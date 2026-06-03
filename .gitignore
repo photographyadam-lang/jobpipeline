@@ -1,0 +1,8 @@
+.env
+jobs/
+archive/
+resumes/
+config/
+node_modules/
+coverage/
+server/bookmarklet.min.js

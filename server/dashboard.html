@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pipeline Dashboard</title>
+<style>
+  /* ===================================================================
+     Design Tokens
+     =================================================================== */
+  :root {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-tertiary: #0f3460;
+    --text-primary: #e0e0e0;
+    --text-muted: #8892b0;
+    --accent-blue: #4fc3f7;
+    --accent-green: #66bb6a;
+    --accent-purple: #ab47bc;
+    --accent-amber: #ffa726;
+    --accent-red: #ef5350;
+    --flag-red: #c62828;
+    --flag-amber: #f57c00;
+    --flag-grey: #616161;
+    --border-color: #2a2a4a;
+    --amber-bg: #3a2e00;
+    --banner-bg: #3a0a0a;
+    --bar-height: 20px;
+  }
+
+  /* ===================================================================
+     Base / Reset
+     =================================================================== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 16px;
+    min-height: 100vh;
+  }
+
+  /* ===================================================================
+     Disconnect Banner
+     =================================================================== */
+  #disconnect-banner {
+    display: none;
+    background: var(--banner-bg);
+    color: var(--accent-red);
+    border: 1px solid var(--accent-red);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-weight: bold;
+    text-align: center;
+    border-radius: 4px;
+  }
+  #disconnect-banner.visible { display: block; }
+
+  /* ===================================================================
+     Header Bar
+     =================================================================== */
+  #header-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+  }
+
+  #header-phase {
+    font-size: 16px;
+    font-weight: bold;
+    color: var(--accent-blue);
+  }
+
+  #header-date {
+    color: var(--text-muted);
+  }
+
+  .counts {
+    margin-left: auto;
+    display: flex;
+    gap: 20px;
+    font-size: 12px;
+  }
+
+  .counts .count-label { color: var(--text-muted); }
+  .count-harvested-val { color: var(--accent-blue); font-weight: bold; }
+  .count-scored-val    { color: var(--accent-green); font-weight: bold; }
+  .count-generated-val { color: var(--accent-purple); font-weight: bold; }
+
+  /* ===================================================================
+     Panels (shared sections)
+     =================================================================== */
+  .panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .panel h3 {
+    font-size: 14px;
+    color: var(--accent-blue);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* ===================================================================
+     Manual AI Ingestion Panel
+     =================================================================== */
+  .ingestion-panel input[type="text"],
+  .ingestion-panel textarea {
+    width: 100%;
+    padding: 10px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: 13px;
+    box-sizing: border-box;
+  }
+  .ingestion-panel textarea {
+    min-height: 150px;
+    resize: vertical;
+  }
+  .ingestion-panel input[type="text"]:focus,
+  .ingestion-panel textarea:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+  }
+  .ingestion-panel input[type="text"]:disabled,
+  .ingestion-panel textarea:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .ingestion-btn {
+    padding: 10px 20px;
+    background: var(--accent-blue);
+    color: #000;
+    border: none;
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+  .ingestion-btn:hover {
+    background: #6dd5ff;
+  }
+  .ingestion-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: var(--text-muted);
+  }
+
+  /* ===================================================================
+     Toast Notifications
+     =================================================================== */
+  #toast-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .toast {
+    color: #fff;
+    padding: 12px 20px;
+    border-radius: 4px;
+    font: 13px/1.4 Consolas, 'Courier New', monospace;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    animation: toastIn 0.3s ease;
+    max-width: 400px;
+  }
+  .toast.success { background: #4caf50; }
+  .toast.warning { background: #ff9800; }
+  .toast.error   { background: #f44336; }
+
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ===================================================================
+     Score Distribution — CSS Horizontal Bar Chart
+     =================================================================== */
+  .bars-container { display: flex; flex-direction: column; gap: 6px; }
+
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .bar-label {
+    width: 40px;
+    text-align: right;
+    color: var(--text-muted);
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+
+  .bar-track {
+    flex: 1;
+    height: var(--bar-height);
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .bar-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+  .bar-fill.band-1-3  { background: var(--accent-red); }
+  .bar-fill.band-4-5  { background: var(--accent-amber); }
+  .bar-fill.band-6    { background: #fff176; }
+  .bar-fill.band-7-8  { background: var(--accent-green); }
+  .bar-fill.band-9-10 { background: #81c784; }
+
+  .bar-count {
+    width: 30px;
+    text-align: left;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: bold;
+    flex-shrink: 0;
+  }
+
+  .stats-line {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  /* ===================================================================
+     Stack Rank Table
+     =================================================================== */
+  #stack-rank-table { overflow-x: auto; }
+
+  #stack-rank-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  #stack-rank-table th {
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    padding: 8px 6px;
+    text-align: left;
+    font-weight: bold;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+  }
+
+  #stack-rank-table td {
+    padding: 6px;
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: top;
+  }
+
+  #stack-rank-table tr:hover td { background: rgba(255,255,255,0.04); }
+
+  /* Flag cell styles */
+  .flag-deep-tailor   { background: var(--flag-red); color: #fff; font-weight: bold; text-align: center; border-radius: 2px; }
+  .flag-auto-generated { background: var(--flag-amber); color: #fff; font-weight: bold; text-align: center; border-radius: 2px; }
+  .flag-no-docs       { background: var(--flag-grey); color: #eee; font-weight: bold; text-align: center; border-radius: 2px; }
+
+  /* Fade-in for new rows */
+  @keyframes rowIn { from { opacity: 0; background: rgba(79,195,247,0.1); } to { opacity: 1; background: transparent; } }
+  tr.new-row { animation: rowIn 0.5s ease; }
+
+  /* Quality cell */
+  .quality-cell { text-align: center; font-weight: bold; }
+  .quality-cell.amber { color: var(--accent-amber); background: var(--amber-bg); }
+
+  /* Links cell */
+  .links-cell a {
+    color: var(--accent-blue);
+    text-decoration: none;
+    margin-right: 6px;
+    font-size: 11px;
+  }
+  .links-cell a:hover { text-decoration: underline; }
+  .links-cell a.link-disabled { color: var(--text-muted); pointer-events: none; opacity: 0.4; }
+
+  /* ===================================================================
+     Application History
+     =================================================================== */
+  #app-history-content {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 8px;
+  }
+
+  .history-card {
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+
+  .history-card .h-company { color: var(--accent-blue); font-weight: bold; }
+  .history-card .h-title   { color: var(--text-primary); }
+  .history-card .h-status  { display: inline-block; padding: 1px 6px; border-radius: 2px; font-size: 10px; margin-top: 4px; }
+  .history-card .h-status.status-generated    { background: #2e7d32; color: #fff; }
+  .history-card .h-status.status-applied      { background: #1565c0; color: #fff; }
+  .history-card .h-status.status-interviewing { background: #6a1b9a; color: #fff; }
+  .history-card .h-status.status-rejected     { background: #b71c1c; color: #fff; }
+  .history-card .h-status.status-offer        { background: #1b5e20; color: #fff; }
+  .history-card .h-status.status-withdrawn    { background: #4e342e; color: #fff; }
+
+  .history-summary {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 10px;
+    font-size: 12px;
+  }
+  .history-summary span { color: var(--text-muted); }
+  .history-summary strong { color: var(--text-primary); }
+
+  .empty-state {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 20px;
+    text-align: center;
+  }
+
+  /* ===================================================================
+     Activity Log
+     =================================================================== */
+  #activity-log {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  #log-entries {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.6;
+  }
+
+  .log-entry {
+    padding: 2px 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    white-space: nowrap;
+  }
+
+  .log-entry .log-time  { color: var(--text-muted); }
+  .log-entry .log-type  { font-weight: bold; }
+
+  .log-harvested { color: var(--accent-blue); }
+  .log-scored    { color: var(--accent-green); }
+  .log-generated { color: var(--accent-purple); }
+  .log-warn      { color: var(--accent-amber); }
+  .log-error     { color: var(--accent-red); }
+  .log-complete  { color: var(--text-primary); }
+  .log-info      { color: var(--text-muted); }
+
+  /* ===================================================================
+     Scrollbar styling
+     =================================================================== */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg-primary); }
+  ::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #1a4a7a; }
+
+  /* ===================================================================
+     Responsive
+     =================================================================== */
+  @media (max-width: 768px) {
+    body { padding: 8px; font-size: 12px; }
+    #header-bar { flex-direction: column; align-items: flex-start; }
+    .counts { margin-left: 0; }
+    #stack-rank-table table { font-size: 11px; }
+    #stack-rank-table th, #stack-rank-table td { padding: 4px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ================================================================ -->
+<!-- Disconnect Banner -->
+<!-- ================================================================ -->
+<div id="disconnect-banner"></div>
+
+<!-- ================================================================ -->
+<!-- Header Bar -->
+<!-- ================================================================ -->
+<header id="header-bar">
+  <div>
+    <span id="header-phase">Pipeline Dashboard</span>
+    <span id="header-date" style="margin-left:12px;"></span>
+  </div>
+  <div class="counts">
+    <span><span class="count-label">Harvested:</span> <span id="count-harvested" class="count-harvested-val">0</span></span>
+    <span><span class="count-label">Scored:</span> <span id="count-scored" class="count-scored-val">0</span></span>
+    <span><span class="count-label">Generated:</span> <span id="count-generated" class="count-generated-val">0</span></span>
+  </div>
+</header>
+
+<!-- ================================================================ -->
+<!-- Manual AI Ingestion Platform -->
+<!-- ================================================================ -->
+<section id="ingestion-panel" class="panel ingestion-panel">
+  <h3>Manual AI Ingestion Platform</h3>
+  <div style="margin-bottom:10px;">
+    <input type="text" id="raw-job-url" placeholder="Paste LinkedIn Job URL here...">
+  </div>
+  <div style="margin-bottom:10px;">
+    <textarea id="raw-job-text" placeholder="Paste entire copied job text here..."></textarea>
+  </div>
+  <div>
+    <button id="harvest-raw-btn" type="button" class="ingestion-btn">Harvest via AI Engine</button>
+  </div>
+</section>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<!-- ================================================================ -->
+<!-- Score Distribution Panel -->
+<!-- ================================================================ -->
+<section id="score-distribution" class="panel">
+  <h3>Score Distribution</h3>
+  <div class="bars-container">
+    <div class="bar-row">
+      <span class="bar-label">1-3</span>
+      <div class="bar-track"><div class="bar-fill band-1-3" id="bar-1-3"></div></div>
+      <span class="bar-count" id="count-1-3">0</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">4-5</span>
+      <div class="bar-track"><div class="bar-fill band-4-5" id="bar-4-5"></div></div>
+      <span class="bar-count" id="count-4-5">0</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">6</span>
+      <div class="bar-track"><div class="bar-fill band-6" id="bar-6"></div></div>
+      <span class="bar-count" id="count-6">0</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">7-8</span>
+      <div class="bar-track"><div class="bar-fill band-7-8" id="bar-7-8"></div></div>
+      <span class="bar-count" id="count-7-8">0</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">9-10</span>
+      <div class="bar-track"><div class="bar-fill band-9-10" id="bar-9-10"></div></div>
+      <span class="bar-count" id="count-9-10">0</span>
+    </div>
+  </div>
+  <div id="score-stats" class="stats-line" style="display:none;"></div>
+</section>
+
+<!-- ================================================================ -->
+<!-- Stack Rank Table -->
+<!-- ================================================================ -->
+<section id="stack-rank-table" class="panel">
+  <h3>Stack Rank</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Rank</th>
+        <th>Score</th>
+        <th>Flag</th>
+        <th>Company</th>
+        <th>Title</th>
+        <th>Location</th>
+        <th>Salary</th>
+        <th>Fit</th>
+        <th>Gap</th>
+        <th>R★</th>
+        <th>CL★</th>
+        <th>Links</th>
+      </tr>
+    </thead>
+    <tbody id="rank-tbody"></tbody>
+  </table>
+</section>
+
+<!-- ================================================================ -->
+<!-- Application History Panel -->
+<!-- ================================================================ -->
+<section id="app-history" class="panel">
+  <h3>Application History</h3>
+  <div id="app-history-content"></div>
+</section>
+
+<!-- ================================================================ -->
+<!-- Activity Log -->
+<!-- ================================================================ -->
+<section id="activity-log" class="panel">
+  <h3>Activity Log</h3>
+  <div id="log-entries"></div>
+</section>
+
+<!-- ================================================================ -->
+<!-- JavaScript — All Inline, No Dependencies -->
+<!-- ================================================================ -->
+<script>
+'use strict';
+
+/* ------------------------------------------------------------------ */
+/* DOM References                                                      */
+/* ------------------------------------------------------------------ */
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+const disconnectBanner    = $('#disconnect-banner');
+const headerPhase         = $('#header-phase');
+const headerDate          = $('#header-date');
+const countHarvested      = $('#count-harvested');
+const countScored         = $('#count-scored');
+const countGenerated      = $('#count-generated');
+const rankTbody           = $('#rank-tbody');
+const scoreStats          = $('#score-stats');
+const logEntries          = $('#log-entries');
+const appHistoryContent   = $('#app-history-content');
+
+/* Distribution bar elements */
+const barConfig = [
+  { id: 'bar-1-3',  countId: 'count-1-3',  key: '1-3' },
+  { id: 'bar-4-5',  countId: 'count-4-5',  key: '4-5' },
+  { id: 'bar-6',    countId: 'count-6',    key: '6'   },
+  { id: 'bar-7-8',  countId: 'count-7-8',  key: '7-8' },
+  { id: 'bar-9-10', countId: 'count-9-10', key: '9-10'},
+];
+
+/* ------------------------------------------------------------------ */
+/* Quality Formatter                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Format a quality score for display.
+ * Returns "—" for null/undefined.
+ * Returns "⚠️ N/10" in amber for scores < 6.
+ * Returns "N/10" otherwise.
+ * @param {number|null} score
+ * @returns {string}
+ */
+function formatQuality(score) {
+  if (score === null || score === undefined) return '\u2014';
+  if (score < 6) return '\u26A0\uFE0F ' + score + '/10';
+  return score + '/10';
+}
+
+/**
+ * Check if a quality score is low (< 6).
+ * @param {number|null} score
+ * @returns {boolean}
+ */
+function isLowQuality(score) {
+  return score !== null && score !== undefined && score < 6;
+}
+
+/* ------------------------------------------------------------------ */
+/* Banner                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Show or hide the disconnect banner with a given message.
+ * @param {string|null} message - null to hide, string to show.
+ */
+function showBanner(message) {
+  if (message) {
+    disconnectBanner.textContent = message;
+    disconnectBanner.classList.add('visible');
+  } else {
+    disconnectBanner.classList.remove('visible');
+    disconnectBanner.textContent = '';
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Header / Counts                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Update the phase indicator in the header.
+ * @param {string} phase - 'idle', 'scoring', 'generating', or any custom string.
+ * @param {string|null} [dateStr] - Optional date string.
+ */
+function updateHeader(phase, dateStr) {
+  var label = 'Pipeline Dashboard';
+  if (phase === 'scoring')    label = '\u{1F3AF} Scoring Jobs...';
+  if (phase === 'generating') label = '\u2699\uFE0F Generating Documents...';
+  if (phase === 'idle')       label = 'Pipeline Dashboard';
+  if (phase === 'harvesting') label = '\u{1F33D} Harvesting...';
+
+  headerPhase.textContent = label;
+
+  if (dateStr) {
+    headerDate.textContent = '[' + dateStr + ']';
+  }
+}
+
+/**
+ * Update the harvested/scored/generated count indicators.
+ * @param {number} h - harvested count.
+ * @param {number} s - scored count.
+ * @param {number} g - generated count.
+ */
+function updateCounts(h, s, g) {
+  countHarvested.textContent = h;
+  countScored.textContent    = s;
+  countGenerated.textContent = g;
+}
+
+/* ------------------------------------------------------------------ */
+/* Score Distribution — Bar Chart                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Update the CSS bar chart from a distribution object.
+ * Accepts either a flat distribution or looks up from state.stats.
+ * @param {object} distribution - e.g. { '1-3': 2, '4-5': 1, '6': 3, '7-8': 2, '9-10': 0 }
+ */
+function updateDistribution(distribution) {
+  if (!distribution) return;
+
+  var maxVal = 1;
+  for (var i = 0; i < barConfig.length; i++) {
+    var val = distribution[barConfig[i].key] || 0;
+    if (val > maxVal) maxVal = val;
+  }
+
+  for (var j = 0; j < barConfig.length; j++) {
+    var cfg = barConfig[j];
+    var count = distribution[cfg.key] || 0;
+    var pct = (count / maxVal) * 100;
+    document.getElementById(cfg.id).style.width = pct + '%';
+    document.getElementById(cfg.countId).textContent = count;
+  }
+}
+
+/**
+ * Show the stats line (mean, min, max) after scoring completes.
+ * @param {object} stats - { scoreMean, scoreMin, scoreMax }
+ */
+function showStats(stats) {
+  if (!stats || stats.scoreMean === null || stats.scoreMean === undefined) {
+    scoreStats.style.display = 'none';
+    return;
+  }
+  scoreStats.style.display = 'block';
+  scoreStats.textContent = 'Mean: ' + stats.scoreMean.toFixed(1) +
+    ' | Range: ' + (stats.scoreMin ?? '?') + '\u2013' + (stats.scoreMax ?? '?') +
+    ' | Total scored: ' + (stats.scored ?? '?');
+}
+
+/* ------------------------------------------------------------------ */
+/* Stack Rank Table                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Map action flag string to CSS class and display text.
+ * @param {string|null} flag
+ * @returns {{ cssClass: string, text: string }}
+ */
+function flagDisplay(flag) {
+  switch (flag) {
+    case 'DEEP_TAILOR':    return { cssClass: 'flag-deep-tailor',   text: '\uD83D\uDD34 DEEP TAILOR' };
+    case 'AUTO_GENERATED': return { cssClass: 'flag-auto-generated',text: '\uD83D\uDFE1 AUTO-GEN' };
+    case 'NO_DOCS':        return { cssClass: 'flag-no-docs',       text: '\u26AA NO DOCS' };
+    default:               return { cssClass: '',                   text: flag || '\u2014' };
+  }
+}
+
+/**
+ * Add a row to the stack rank table from a job_scored event.
+ * The row gets a `data-source-filename` attribute for later quality matching.
+ * @param {object} data - job_scored payload.
+ */
+function addTableRow(data) {
+  if (!data) return;
+  var tr = document.createElement('tr');
+  tr.setAttribute('data-source-filename', data.sourceFilename || '');
+  tr.classList.add('new-row');
+
+  var fd = flagDisplay(data.actionFlag);
+
+  // Build links cell
+  var linksHtml = '';
+  if (data.url) {
+    // Sanitize URL for display — truncate if too long
+    var urlLabel = 'JD';
+    linksHtml += '<a href="' + escapeHtml(data.url) + '" target="_blank" title="' + escapeHtml(data.url) + '">' + urlLabel + '</a>';
+  } else {
+    linksHtml += '<span class="link-disabled">JD</span>';
+  }
+  // Resume and CL links start disabled — enabled on doc_generated
+  linksHtml += ' <span class="link-disabled" data-resume-link="1">Resume</span>';
+  linksHtml += ' <span class="link-disabled" data-cl-link="1">CL</span>';
+
+  tr.innerHTML =
+    '<td>' + (data.rank ?? '\u2014') + '</td>' +
+    '<td><strong>' + data.score + '</strong>/10</td>' +
+    '<td><span class="' + fd.cssClass + '">' + fd.text + '</span></td>' +
+    '<td>' + escapeHtml(data.company || '') + '</td>' +
+    '<td>' + escapeHtml(data.title || '') + '</td>' +
+    '<td>' + escapeHtml(data.location || '\u2014') + '</td>' +
+    '<td>' + escapeHtml(data.salary || '\u2014') + '</td>' +
+    '<td>' + escapeHtml(truncateText(data.fitSignal || '', 60)) + '</td>' +
+    '<td>' + escapeHtml(truncateText(data.gap || '', 60)) + '</td>' +
+    '<td class="quality-cell r-star">\u2014</td>' +
+    '<td class="quality-cell cl-star">\u2014</td>' +
+    '<td class="links-cell">' + linksHtml + '</td>';
+
+  rankTbody.appendChild(tr);
+}
+
+/**
+ * Clear all rows from the stack rank table.
+ */
+function clearTable() {
+  rankTbody.innerHTML = '';
+}
+
+/**
+ * Update the quality cells (R★ and CL★) for a specific row by sourceFilename.
+ * Called on doc_generated events.
+ * @param {object} data - doc_generated payload with sourceFilename, resumeQuality, coverLetterQuality.
+ */
+function updateQualityCell(data) {
+  if (!data || !data.sourceFilename) return;
+  var row = document.querySelector('tr[data-source-filename="' + cssSelectorEscape(data.sourceFilename) + '"]');
+  if (!row) return;
+
+  var rCell   = row.querySelector('.r-star');
+  var clCell  = row.querySelector('.cl-star');
+  var linksCell = row.querySelector('.links-cell');
+
+  if (!rCell || !clCell) return;
+
+  // Set quality values
+  if (data.resumeQuality !== null && data.resumeQuality !== undefined) {
+    var rText = formatQuality(data.resumeQuality);
+    rCell.textContent = rText;
+    rCell.classList.remove('amber');
+    if (isLowQuality(data.resumeQuality)) rCell.classList.add('amber');
+  }
+
+  if (data.coverLetterQuality !== null && data.coverLetterQuality !== undefined) {
+    var clText = formatQuality(data.coverLetterQuality);
+    clCell.textContent = clText;
+    clCell.classList.remove('amber');
+    if (isLowQuality(data.coverLetterQuality)) clCell.classList.add('amber');
+  }
+
+  // Enable Resume and CL links — mark them as generated
+  if (linksCell) {
+    var resumeLink = linksCell.querySelector('[data-resume-link]');
+    var clLink     = linksCell.querySelector('[data-cl-link]');
+    if (resumeLink) {
+      resumeLink.outerHTML = '<a href="resume.md" target="_blank" class="gen-link">Resume</a>';
+    }
+    if (clLink) {
+      clLink.outerHTML = '<a href="cover_letter.md" target="_blank" class="gen-link">CL</a>';
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Application History                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Render the application history panel from state data.
+ * @param {Array} history - Array of ApplicationRecord objects (last 10).
+ */
+function renderAppHistory(history) {
+  if (!history || history.length === 0) {
+    appHistoryContent.innerHTML = '<div class="empty-state">No applications yet. Run <code>generate.js</code> to create application packages.</div>';
+    return;
+  }
+
+  // Summary counts by status
+  var statusCounts = {};
+  for (var i = 0; i < history.length; i++) {
+    var s = history[i].status || 'unknown';
+    statusCounts[s] = (statusCounts[s] || 0) + 1;
+  }
+  var summaryHtml = '<div class="history-summary">';
+  var statusOrder = ['generated', 'applied', 'interviewing', 'rejected', 'offer', 'withdrawn'];
+  for (var j = 0; j < statusOrder.length; j++) {
+    var st = statusOrder[j];
+    if (statusCounts[st]) {
+      summaryHtml += '<span>' + st + ': <strong>' + statusCounts[st] + '</strong></span>';
+    }
+  }
+  summaryHtml += '</div>';
+
+  var cardsHtml = '';
+  for (var k = 0; k < history.length; k++) {
+    var rec = history[k];
+    cardsHtml +=
+      '<div class="history-card">' +
+      '  <div><span class="h-company">' + escapeHtml(rec.company || '') + '</span> &mdash; <span class="h-title">' + escapeHtml(rec.title || '') + '</span></div>' +
+      '  <div style="margin-top:2px;">Score: <strong>' + (rec.score ?? '?') + '</strong>/10 &middot; Generated: ' + (rec.dateGenerated || '?') + '</div>' +
+      '  <div><span class="h-status status-' + (rec.status || 'generated') + '">' + (rec.status || 'generated') + '</span></div>' +
+      '</div>';
+  }
+
+  appHistoryContent.innerHTML = summaryHtml + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;">' + cardsHtml + '</div>';
+}
+
+/* ------------------------------------------------------------------ */
+/* Activity Log                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Get the CSS log class for an event type.
+ * @param {string} type
+ * @returns {string}
+ */
+function logClassForType(type) {
+  switch (type) {
+    case 'job_harvested':      return 'log-harvested';
+    case 'job_scored':
+    case 'scoring_started':
+    case 'scoring_complete':   return 'log-scored';
+    case 'doc_generated':
+    case 'generation_started':
+    case 'generation_complete':return 'log-generated';
+    case 'job_skipped':
+    case 'doc_skipped':        return 'log-warn';
+    case 'error':              return 'log-error';
+    default:                   return 'log-info';
+  }
+}
+
+/**
+ * Get a human-readable summary for an event.
+ * @param {object} event - The parsed SSE event.
+ * @returns {string}
+ */
+function eventSummary(event) {
+  var d = event.data || {};
+  switch (event.type) {
+    case 'scoring_started':
+      return 'Scoring started — ' + (d.total || 0) + ' jobs';
+    case 'job_scored':
+      return 'Scored: ' + escapeHtml(d.company || '') + ' \u2014 ' + escapeHtml(d.title || '') + ' [' + (d.score ?? '?') + '/10]';
+    case 'job_skipped':
+      return 'Skipped: ' + escapeHtml(d.filename || '') + ' \u2014 ' + escapeHtml(d.reason || '');
+    case 'scoring_complete':
+      return 'Scoring complete \u2014 ' + (d.scored || 0) + ' jobs scored';
+    case 'generation_started':
+      return 'Generation started \u2014 ' + (d.total || 0) + ' documents';
+    case 'doc_generated':
+      var note = '';
+      if (d.resumeQuality !== null && d.resumeQuality !== undefined) note += ' R★=' + d.resumeQuality;
+      if (d.coverLetterQuality !== null && d.coverLetterQuality !== undefined) note += ' CL★=' + d.coverLetterQuality;
+      return 'Generated: ' + escapeHtml(d.company || '') + ' \u2014 ' + escapeHtml(d.title || '') + note;
+    case 'doc_skipped':
+      return 'Skipped: ' + escapeHtml(d.company || '') + ' \u2014 ' + escapeHtml(d.reason || '');
+    case 'generation_complete':
+      return 'Generation complete \u2014 ' + (d.generated || 0) + ' packages';
+    case 'job_harvested':
+      return 'Harvested: ' + escapeHtml(d.company || '') + ' \u2014 ' + escapeHtml(d.title || '');
+    default:
+      return event.type + (d.company ? ': ' + escapeHtml(d.company) : '');
+  }
+}
+
+/**
+ * Append a timestamped entry to the activity log and auto-scroll.
+ * @param {object} event - The parsed SSE event { type, data }.
+ */
+function addLogEntry(event) {
+  if (!event || !event.type) return;
+
+  var now = new Date();
+  var time = pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
+
+  var div = document.createElement('div');
+  div.className = 'log-entry ' + logClassForType(event.type);
+
+  var summary = eventSummary(event);
+
+  // Handle state events silently (don't add log entry for initial state)
+  if (event.type === 'state') return;
+
+  div.innerHTML = '<span class="log-time">[' + time + ']</span> <span class="log-type">' + event.type + '</span> ' + summary;
+  logEntries.appendChild(div);
+
+  // Auto-scroll to bottom
+  var logPanel = document.getElementById('activity-log');
+  logPanel.scrollTop = logPanel.scrollHeight;
+}
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Pad a number to 2 digits.
+ * @param {number} n
+ * @returns {string}
+ */
+function pad2(n) {
+  return n < 10 ? '0' + n : '' + n;
+}
+
+/**
+ * Escape HTML special characters to prevent XSS in dashboard display.
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeHtml(str) {
+  if (typeof str !== 'string') return String(str ?? '');
+  var ampRepl = '&' + 'amp;';
+  var ltRepl  = '&' + 'lt;';
+  var gtRepl  = '&' + 'gt;';
+  var quotRepl = '&' + 'quot;';
+  var aposRepl = '&#' + '39;';
+  return str
+    .replace(/&/g, ampRepl)
+    .replace(/</g, ltRepl)
+    .replace(/>/g, gtRepl)
+    .replace(/"/g, quotRepl)
+    .replace(/'/g, aposRepl);
+}
+
+/**
+ * Truncate text to a max length, appending "..." if truncated.
+ * @param {string} str
+ * @param {number} maxLen
+ * @returns {string}
+ */
+function truncateText(str, maxLen) {
+  if (!str) return '';
+  if (str.length <= maxLen) return str;
+  return str.substring(0, maxLen) + '...';
+}
+
+/**
+ * Escape special CSS selector characters in a string.
+ * @param {string} str
+ * @returns {string}
+ */
+function cssSelectorEscape(str) {
+  if (!str) return '';
+  // Escape CSS special characters using CSS.escape polyfill for older browsers
+  return String(str).replace(/["'\\\x00-\x1f\x7f-\x9f]/g, function(c) {
+    return '\\' + c.charCodeAt(0).toString(16) + ' ';
+  }).replace(/[ !"#$%&'()*+,.\/:;<=>?@[\]^`{|}~]/g, function(c) {
+    return '\\' + c;
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Event Handler — Core Dispatch                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Current running counts derived from state events.
+ * Updated incrementally as events arrive.
+ */
+var currentCounts = { harvested: 0, scored: 0, generated: 0 };
+
+/**
+ * Handle an incoming SSE event.
+ * @param {object} event - Parsed event from EventSource.
+ */
+function handleEvent(event) {
+  if (!event || !event.type) return;
+
+  var data = event.data || {};
+
+  switch (event.type) {
+
+    case 'state':
+      // Full state snapshot — bulk populate
+      populateFromState(data);
+      break;
+
+    case 'job_harvested':
+      currentCounts.harvested++;
+      updateCounts(currentCounts.harvested, currentCounts.scored, currentCounts.generated);
+      addLogEntry(event);
+      break;
+
+    case 'scoring_started':
+      updateHeader('scoring', data.date || null);
+      clearTable();
+      currentCounts.scored = 0;
+      updateCounts(currentCounts.harvested, currentCounts.scored, currentCounts.generated);
+      addLogEntry(event);
+      break;
+
+    case 'job_scored':
+      addTableRow(data);
+      currentCounts.scored++;
+      // Recalculate distribution from all scored entries (state update will cover this)
+      addLogEntry(event);
+      break;
+
+    case 'scoring_complete':
+      updateHeader('idle');
+      updateDistribution(data.distribution);
+      showStats(data);
+      addLogEntry(event);
+      break;
+
+    case 'generation_started':
+      updateHeader('generating');
+      currentCounts.generated = 0;
+      updateCounts(currentCounts.harvested, currentCounts.scored, currentCounts.generated);
+      addLogEntry(event);
+      break;
+
+    case 'doc_generated':
+      updateQualityCell(data);
+      currentCounts.generated++;
+      updateCounts(currentCounts.harvested, currentCounts.scored, currentCounts.generated);
+      addLogEntry(event);
+      break;
+
+    case 'doc_skipped':
+      addLogEntry(event);
+      break;
+
+    case 'generation_complete':
+      updateHeader('idle');
+      addLogEntry(event);
+      break;
+
+    default:
+      addLogEntry(event);
+      break;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Populate from State (on initial load)                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Populate the entire dashboard from a state object returned by /state.
+ * @param {object} state - The full pipeline state object.
+ */
+function populateFromState(state) {
+  if (!state) return;
+
+  // Header
+  updateHeader(state.phase || 'idle', state.date || null);
+
+  // Counts
+  var hCount = (state.harvested && state.harvested.length) || 0;
+  var sCount = (state.scored && state.scored.length) || 0;
+  var gCount = (state.generated && state.generated.length) || 0;
+  currentCounts.harvested = hCount;
+  currentCounts.scored    = sCount;
+  currentCounts.generated = gCount;
+  updateCounts(hCount, sCount, gCount);
+
+  // Distribution
+  if (state.stats && state.stats.distribution) {
+    updateDistribution(state.stats.distribution);
+  }
+
+  // Stats line
+  if (state.stats && state.stats.scoreMean !== null && state.stats.scoreMean !== undefined) {
+    showStats(state.stats);
+  }
+
+  // Stack rank table — add each scored job as a row
+  clearTable();
+  if (state.scored && state.scored.length > 0) {
+    for (var i = 0; i < state.scored.length; i++) {
+      addTableRow(state.scored[i]);
+    }
+  }
+
+  // Quality cells — overlay doc_generated data on existing rows
+  if (state.generated && state.generated.length > 0) {
+    for (var j = 0; j < state.generated.length; j++) {
+      updateQualityCell(state.generated[j]);
+    }
+  }
+
+  // Application history
+  renderAppHistory(state.applicationHistory || []);
+}
+
+/* ------------------------------------------------------------------ */
+/* Initialization — Called on DOMContentLoaded                           */
+/* ------------------------------------------------------------------ */
+
+function init() {
+  // Step 1: Fetch current state from server
+  fetch('/state')
+    .then(function(res) {
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+      return res.json();
+    })
+    .then(function(state) {
+      populateFromState(state);
+      showBanner(null); // Clear any existing banner
+    })
+    .catch(function() {
+      showBanner('Server not running \u2014 start with: node server/server.js');
+      return; // Don't connect EventSource if server is down
+    });
+
+  // Step 2: Connect to SSE stream
+  var evtSource = new EventSource('/events');
+
+  evtSource.onmessage = function(e) {
+    try {
+      var event = JSON.parse(e.data);
+      handleEvent(event);
+    } catch (err) {
+      // Ignore parse errors in SSE stream
+    }
+  };
+
+  evtSource.onerror = function() {
+    showBanner('Connection lost \u2014 reload to reconnect.');
+  };
+
+  // Step 3: Wire the manual ingestion form
+  wireIngestionForm();
+}
+
+// Wait for DOM to be ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+
+/* ------------------------------------------------------------------ */
+/* Manual AI Ingestion — Toast + Harvest Handler                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Show a toast notification.
+ * @param {string} message - Message text.
+ * @param {string} type - 'success' (green), 'warning' (amber), or 'error' (red).
+ */
+function showToast(message, type) {
+  var container = document.getElementById('toast-container');
+  if (!container) return;
+  var toast = document.createElement('div');
+  toast.textContent = message;
+  toast.className = 'toast ' + (type || 'success');
+  container.appendChild(toast);
+  setTimeout(function() { toast.remove(); }, 4000);
+}
+
+/**
+ * Wire up the Manual AI Ingestion form.
+ */
+function wireIngestionForm() {
+  var btn = document.getElementById('harvest-raw-btn');
+  var urlInput = document.getElementById('raw-job-url');
+  var textInput = document.getElementById('raw-job-text');
+
+  if (!btn) {
+    alert('ERR: Ingestion form initialization failed \u2014 missing harvest button.');
+    return;
+  }
+
+  if (!urlInput || !textInput) {
+    btn.textContent = 'ERR: Missing input fields';
+    btn.disabled = true;
+    return;
+  }
+
+  btn.addEventListener('click', async function() {
+    var url = urlInput.value.trim();
+    var rawText = textInput.value.trim();
+
+    if (!url || !rawText) {
+      showToast('Please fill in both the URL and the job description text.', 'warning');
+      return;
+    }
+
+    // Disable inputs and show loading state
+    btn.disabled = true;
+    btn.textContent = 'Harvesting... \u23F3';
+    urlInput.disabled = true;
+    textInput.disabled = true;
+
+    try {
+      var res = await fetch('/harvest-raw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url, rawText: rawText }),
+      });
+
+      if (res.status === 200) {
+        var data = await res.json();
+        showToast('AI Saved: ' + (data.company || 'Company') + ' \u2014 ' + (data.title || 'Title'), 'success');
+        urlInput.value = '';
+        textInput.value = '';
+      } else if (res.status === 409) {
+        showToast('Duplicate URL \u2014 this job has already been saved.', 'warning');
+      } else {
+        var errData = await res.json().catch(function() { return {}; });
+        showToast('Error: ' + (errData.message || 'Harvest failed. Check server logs.'), 'error');
+      }
+    } catch (err) {
+      showToast('Network error \u2014 is the server running?', 'error');
+    } finally {
+      // Restore inputs
+      btn.disabled = false;
+      btn.textContent = 'Harvest via AI Engine';
+      urlInput.disabled = false;
+      textInput.disabled = false;
+    }
+  });
+}
+
+</script>
+</body>
+</html>
