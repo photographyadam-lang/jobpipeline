@@ -62,6 +62,7 @@ describe('GET /dashboard — dashboard.html serving', () => {
     expect(html).toContain('id="stack-rank-table"');
     expect(html).toContain('id="app-history"');
     expect(html).toContain('id="activity-log"');
+    expect(html).toContain('id="debug-panel"');
 
     // Ingestion panel elements
     expect(html).toContain('id="ingestion-panel"');

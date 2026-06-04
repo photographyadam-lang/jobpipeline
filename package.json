@@ -16,7 +16,8 @@
     "generate": "node generate.js",
     "cleanup": "node cleanup.js",
     "apply": "node apply.js",
-    "build:bookmarklet": "node scripts/minify-bookmarklet.js"
+    "build:bookmarklet": "node scripts/minify-bookmarklet.js",
+    "qa": "node src/qa.js"
   },
   "dependencies": {
     "dotenv": "^16.0.0",

@@ -242,6 +242,82 @@ async function archiveJobFiles(jobsDir, archiveDir, dateStr) {
   return mdFiles.length;
 }
 
+/**
+ * List all application document files (resume.md, cover_letter.md) within
+ * a dated output directory.
+ *
+ * Scans each company subdirectory under resumes/[dateStr]/ and collects
+ * the paths of resume.md and cover_letter.md files found within.
+ *
+ * @param {string} resumesDir - Path to the resumes directory.
+ * @param {string} dateStr - Date string in "YYYY-MM-DD" format.
+ * @returns {Promise<{ filePath: string, relativePath: string, docType: 'resume'|'cover_letter' }[]>}
+ * @throws {Error} Propagates fs errors (ENOENT if date directory does not exist).
+ */
+async function readDateDir(resumesDir, dateStr) {
+  const targetDir = path.join(resumesDir, dateStr);
+  const entries = await fs.readdir(targetDir, { withFileTypes: true });
+  const results = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dirPath = path.join(targetDir, entry.name);
+
+    for (const docName of ['resume.md', 'cover_letter.md']) {
+      const filePath = path.join(dirPath, docName);
+      try {
+        await fs.access(filePath);
+        const docType = docName === 'resume.md' ? 'resume' : 'cover_letter';
+        const relativePath = path.join(dateStr, entry.name, docName);
+        results.push({ filePath, relativePath, docType });
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err;
+        // File does not exist — skip silently
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Write the aggregate QA report markdown file to a dated output directory.
+ *
+ * @param {string} resumesDir - Path to the resumes directory.
+ * @param {string} dateStr - Date string in "YYYY-MM-DD" format.
+ * @param {string} content - Markdown report content.
+ * @returns {Promise<string>} The full path written.
+ */
+async function writeQaReport(resumesDir, dateStr, content) {
+  const targetDir = path.join(resumesDir, dateStr);
+  await fs.mkdir(targetDir, { recursive: true });
+  const fullPath = path.join(targetDir, 'qa_report.md');
+  await fs.writeFile(fullPath, content, 'utf-8');
+  return fullPath;
+}
+
+/**
+ * Read a single application document file from disk.
+ *
+ * @param {string} filePath - Absolute path to the file to read.
+ * @returns {Promise<string>} The file content as a UTF-8 string.
+ * @throws {Error} Propagates fs errors (ENOENT if file does not exist).
+ */
+async function readDocFile(filePath) {
+  return await fs.readFile(filePath, 'utf-8');
+}
+
+/**
+ * Overwrite a single application document file with new content.
+ *
+ * @param {string} filePath - Absolute path to the file to write.
+ * @param {string} content - New content to write.
+ * @returns {Promise<void>}
+ */
+async function writeDocFile(filePath, content) {
+  await fs.writeFile(filePath, content, 'utf-8');
+}
+
 module.exports = {
   readJobFiles,
   writeJobFile,
@@ -253,4 +329,8 @@ module.exports = {
   readApplications,
   writeApplications,
   archiveJobFiles,
+  readDateDir,
+  writeQaReport,
+  readDocFile,
+  writeDocFile,
 };

@@ -492,3 +492,162 @@ describe('archiveJobFiles', () => {
     expect(count).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// readDocFile / writeDocFile
+// ---------------------------------------------------------------------------
+describe('readDocFile / writeDocFile', () => {
+  let tmpDir;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'job-pipeline-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('reads existing file content', async () => {
+    const filePath = path.join(tmpDir, 'test.md');
+    await fs.writeFile(filePath, '# Document content', 'utf-8');
+
+    const content = await fileStore.readDocFile(filePath);
+    expect(content).toBe('# Document content');
+  });
+
+  it('throws ENOENT when file does not exist', async () => {
+    const filePath = path.join(tmpDir, 'nonexistent.md');
+
+    await expect(fileStore.readDocFile(filePath)).rejects.toThrow(/ENOENT|no such file/i);
+  });
+
+  it('writes content to specified path', async () => {
+    const filePath = path.join(tmpDir, 'output.md');
+    const content = '# Sanitized document';
+
+    await fileStore.writeDocFile(filePath, content);
+
+    const written = await fs.readFile(filePath, 'utf-8');
+    expect(written).toBe(content);
+  });
+
+  it('overwrites existing file content', async () => {
+    const filePath = path.join(tmpDir, 'existing.md');
+    await fs.writeFile(filePath, '# Original content', 'utf-8');
+
+    await fileStore.writeDocFile(filePath, '# Updated content');
+
+    const written = await fs.readFile(filePath, 'utf-8');
+    expect(written).toBe('# Updated content');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readDateDir
+// ---------------------------------------------------------------------------
+describe('readDateDir', () => {
+  let tmpDir;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'job-pipeline-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('finds resume.md and cover_letter.md in company subdirectories', async () => {
+    const resumesDir = path.join(tmpDir, 'resumes');
+    const dateStr = '2026-06-02';
+
+    // Create company subdirectories with documents
+    const company1Dir = path.join(resumesDir, dateStr, 'Company-A - Job-Title');
+    await fs.mkdir(company1Dir, { recursive: true });
+    await fs.writeFile(path.join(company1Dir, 'resume.md'), '# Resume A', 'utf-8');
+    await fs.writeFile(path.join(company1Dir, 'cover_letter.md'), '# CL A', 'utf-8');
+
+    const company2Dir = path.join(resumesDir, dateStr, 'Company-B - Another-Role');
+    await fs.mkdir(company2Dir, { recursive: true });
+    await fs.writeFile(path.join(company2Dir, 'resume.md'), '# Resume B', 'utf-8');
+
+    const results = await fileStore.readDateDir(resumesDir, dateStr);
+
+    expect(results).toHaveLength(3);
+    expect(results.filter(r => r.docType === 'resume')).toHaveLength(2);
+    expect(results.filter(r => r.docType === 'cover_letter')).toHaveLength(1);
+
+    // Check relative paths
+    expect(results[0].relativePath).toContain(dateStr);
+    expect(results[0].filePath).toBeDefined();
+  });
+
+  it('skips subdirectories without matching files', async () => {
+    const resumesDir = path.join(tmpDir, 'resumes');
+    const dateStr = '2026-06-02';
+
+    const subDir = path.join(resumesDir, dateStr, 'Empty-Co - Role');
+    await fs.mkdir(subDir, { recursive: true });
+    // No files inside
+
+    const results = await fileStore.readDateDir(resumesDir, dateStr);
+    expect(results).toHaveLength(0);
+  });
+
+  it('returns empty array when no company subdirectories exist', async () => {
+    const resumesDir = path.join(tmpDir, 'resumes');
+    const dateStr = '2026-06-02';
+
+    await fs.mkdir(path.join(resumesDir, dateStr), { recursive: true });
+    // No subdirectories
+
+    const results = await fileStore.readDateDir(resumesDir, dateStr);
+    expect(results).toHaveLength(0);
+  });
+
+  it('propagates ENOENT when date directory does not exist', async () => {
+    const resumesDir = path.join(tmpDir, 'nonexistent');
+    const dateStr = '2026-06-02';
+
+    await expect(fileStore.readDateDir(resumesDir, dateStr)).rejects.toThrow(/ENOENT|no such file|ENOTDIR/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// writeQaReport
+// ---------------------------------------------------------------------------
+describe('writeQaReport', () => {
+  let tmpDir;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'job-pipeline-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('writes qa_report.md to dated directory', async () => {
+    const resumesDir = path.join(tmpDir, 'resumes');
+    const dateStr = '2026-06-02';
+    const content = '# QA Report\n\n## Executive Summary\n\nAll files passed.';
+
+    const fullPath = await fileStore.writeQaReport(resumesDir, dateStr, content);
+
+    expect(fullPath).toContain('qa_report.md');
+    expect(fullPath).toContain(dateStr);
+
+    const written = await fs.readFile(fullPath, 'utf-8');
+    expect(written).toBe(content);
+  });
+
+  it('creates dated subdirectory when absent', async () => {
+    const resumesDir = path.join(tmpDir, 'resumes');
+    const dateStr = '2026-06-02';
+    const content = '# QA Report';
+
+    await fileStore.writeQaReport(resumesDir, dateStr, content);
+
+    const dirStat = await fs.stat(path.join(resumesDir, dateStr));
+    expect(dirStat.isDirectory()).toBe(true);
+  });
+});

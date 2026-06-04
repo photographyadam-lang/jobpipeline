@@ -4,6 +4,7 @@ require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
+const { spawn } = require('child_process');
 const { parseJobFile, sanitizeForFilename, extractLinkedInJobId } = require('../src/models/job');
 const { readJobFiles, writeJobFile, readApplications } = require('../src/lib/fileStore');
 const { callDeepSeek } = require('../src/lib/deepseek');
@@ -46,6 +47,20 @@ function createApp(jobsDir) {
 
   /** @type {import('express').Response[]} Active SSE response objects */
   const clients = [];
+
+  /**
+   * Tracks the currently executing pipeline subprocess.
+   * Only one pipeline process may run at a time.
+   * @type {import('child_process').ChildProcess|null}
+   */
+  let currentProcess = null;
+
+  /**
+   * Active pipeline-log SSE clients.
+   * These receive raw stdout/stderr chunks from the running process.
+   * @type {import('express').Response[]}
+   */
+  const pipelineClients = [];
 
   // ------------------------------------------------------------------
   // Startup: hydrate URL cache and application history
@@ -275,24 +290,49 @@ function createApp(jobsDir) {
       const linkedInJobId = extractLinkedInJobId(trimmedUrl);
 
       // Call DeepSeek to parse unstructured job text into structured data
+      // NOTE: description is intentionally excluded from AI output — we stitch it
+      // locally after parsing to avoid token truncation on long job descriptions.
       const systemPrompt =
         'You are a data-extraction utility. Read the raw job description text ' +
         'provided by the user and output EXCLUSIVELY a single, minified JSON object ' +
-        'containing these fields: title, company, location, employmentType, salary, description. ' +
+        'containing these metadata fields: title, company, location, employmentType, salary. ' +
+        'Do not extract, include, or repeat the description text field. ' +
         'Do not include markdown wrappers, code fences, or conversational prose. ' +
         'Output ONLY the JSON object.';
 
       const responseContent = await callDeepSeek(systemPrompt, rawText);
 
-      // Parse the LLM response
+      // Parse the LLM response — bulletproof brace extraction
       let parsed;
       try {
-        parsed = JSON.parse(responseContent);
-      } catch {
+        const firstBrace = responseContent.indexOf('{');
+        const lastBrace = responseContent.lastIndexOf('}');
+
+        if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) {
+          logger.error('[server]', `No JSON object found in AI response: ${responseContent}`);
+          res.status(500).json({
+            success: false,
+            message: 'Failed to parse AI response',
+            errorDetails: 'No valid JSON object found — missing opening or closing brace',
+            rawSnippet: responseContent.substring(0, 150),
+          });
+          return;
+        }
+
+        const jsonStr = responseContent.substring(firstBrace, lastBrace + 1);
+        parsed = JSON.parse(jsonStr);
+
+        // Stitch the description locally — preserves the downstream file-writing
+        // contract while reducing the AI output payload to just a few lines of
+        // metadata (prevents truncation on long job descriptions).
+        parsed.description = rawText;
+      } catch (parseErr) {
+        logger.error('[server]', `Failed to parse AI response: ${responseContent}`);
         res.status(500).json({
           success: false,
-          reason: 'parse_error',
           message: 'Failed to parse AI response',
+          errorDetails: `${parseErr.name}: ${parseErr.message}`,
+          rawSnippet: responseContent.substring(0, 150),
         });
         return;
       }
@@ -506,6 +546,119 @@ function createApp(jobsDir) {
   // ------------------------------------------------------------------
   app.get('/state', (_req, res) => {
     res.json(state);
+  });
+
+  // ------------------------------------------------------------------
+  // POST /api/pipeline/run — Spawn a pipeline script via npm run
+  // ------------------------------------------------------------------
+  app.post('/api/pipeline/run', (req, res) => {
+    try {
+      const { task } = req.body || {};
+
+      // Validate task
+      const VALID_TASKS = ['score', 'generate', 'qa'];
+      if (!task || !VALID_TASKS.includes(task)) {
+        res.status(400).json({ error: `Invalid task. Must be one of: ${VALID_TASKS.join(', ')}` });
+        return;
+      }
+
+      // Reject if another process is already running
+      if (currentProcess) {
+        res.status(409).json({ error: `Pipeline process already running (${task})` });
+        return;
+      }
+
+      logger.info('[server]', `Spawning npm run ${task}`);
+
+      // Spawn the npm run task
+      const child = spawn('npm', ['run', task], {
+        cwd: process.cwd(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: true,
+      });
+
+      currentProcess = child;
+
+      // Forward stdout/stderr to pipeline SSE clients
+      child.stdout.on('data', (chunk) => {
+        const text = chunk.toString();
+        const payload = 'data: ' + JSON.stringify({ text }) + '\n\n';
+        for (let i = pipelineClients.length - 1; i >= 0; i--) {
+          try {
+            pipelineClients[i].write(payload);
+          } catch {
+            pipelineClients.splice(i, 1);
+          }
+        }
+      });
+
+      child.stderr.on('data', (chunk) => {
+        const text = chunk.toString();
+        const payload = 'data: ' + JSON.stringify({ text, stream: 'stderr' }) + '\n\n';
+        for (let i = pipelineClients.length - 1; i >= 0; i--) {
+          try {
+            pipelineClients[i].write(payload);
+          } catch {
+            pipelineClients.splice(i, 1);
+          }
+        }
+      });
+
+      child.on('close', (code) => {
+        currentProcess = null;
+        const exitPayload = 'data: ' + JSON.stringify({ type: 'exit', code }) + '\n\n';
+        for (let i = pipelineClients.length - 1; i >= 0; i--) {
+          try {
+            pipelineClients[i].write(exitPayload);
+          } catch {
+            pipelineClients.splice(i, 1);
+          }
+        }
+        logger.info('[server]', `npm run ${task} exited with code ${code}`);
+      });
+
+      child.on('error', (err) => {
+        currentProcess = null;
+        const errPayload = 'data: ' + JSON.stringify({ type: 'error', text: err.message }) + '\n\n';
+        for (let i = pipelineClients.length - 1; i >= 0; i--) {
+          try {
+            pipelineClients[i].write(errPayload);
+          } catch {
+            pipelineClients.splice(i, 1);
+          }
+        }
+        logger.error('[server]', `npm run ${task} spawn error: ${err.message}`);
+      });
+
+      res.status(202).json({ ok: true, task });
+    } catch (err) {
+      logger.error('[server]', `Pipeline run error: ${err.message}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // GET /api/pipeline/logs — SSE stream for pipeline process output
+  // ------------------------------------------------------------------
+  app.get('/api/pipeline/logs', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    // Send an initial connection event
+    res.write('data: ' + JSON.stringify({ type: 'connected' }) + '\n\n');
+
+    // Register client
+    pipelineClients.push(res);
+
+    // Remove client on disconnect
+    req.on('close', () => {
+      const idx = pipelineClients.indexOf(res);
+      if (idx !== -1) {
+        pipelineClients.splice(idx, 1);
+      }
+    });
   });
 
   return app;

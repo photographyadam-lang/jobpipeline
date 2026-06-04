@@ -387,6 +387,249 @@
   ::-webkit-scrollbar-thumb:hover { background: #1a4a7a; }
 
   /* ===================================================================
+     Two-Column Layout
+     =================================================================== */
+  .main-layout {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .main-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* ===================================================================
+     Debug Panel (System Debug Logs)
+     =================================================================== */
+  #debug-panel {
+    width: 380px;
+    min-width: 320px;
+    flex-shrink: 0;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 16px;
+    position: sticky;
+    top: 16px;
+    max-height: calc(100vh - 120px);
+    display: flex;
+    flex-direction: column;
+  }
+  #debug-panel h3 {
+    font-size: 14px;
+    color: var(--accent-blue);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    flex-shrink: 0;
+  }
+  #debug-log-entries {
+    flex: 1;
+    overflow-y: auto;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    padding: 8px;
+    min-height: 200px;
+  }
+  .debug-log-entry {
+    padding: 2px 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .debug-log-entry .log-time {
+    color: var(--text-muted);
+  }
+  .debug-log-entry.log-info {
+    color: #4fc3f7;
+  }
+  .debug-log-entry.log-error {
+    color: #ef5350;
+    font-weight: bold;
+  }
+  .debug-log-entry.log-raw {
+    color: #9e9e9e;
+    font-style: italic;
+  }
+  .debug-log-entry.log-success {
+    color: #66bb6a;
+  }
+
+  /* ===================================================================
+     Pipeline Operations Center
+     =================================================================== */
+  .pipeline-panel .pipeline-buttons {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .pipeline-btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s ease, opacity 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .pipeline-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .pipeline-btn.run-score {
+    background: var(--accent-green);
+    color: #000;
+  }
+  .pipeline-btn.run-score:hover:not(:disabled) {
+    background: #81c784;
+  }
+
+  .pipeline-btn.run-generate {
+    background: var(--accent-purple);
+    color: #fff;
+  }
+  .pipeline-btn.run-generate:hover:not(:disabled) {
+    background: #ce93d8;
+  }
+
+  .pipeline-btn.run-qa {
+    background: var(--accent-amber);
+    color: #000;
+  }
+  .pipeline-btn.run-qa:hover:not(:disabled) {
+    background: #ffb74d;
+  }
+
+  .pipeline-btn .spinner {
+    display: none;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(0,0,0,0.2);
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  .pipeline-btn.running .spinner {
+    display: inline-block;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .pipeline-btn.running {
+    pointer-events: none;
+  }
+
+  /* Terminal emulation viewport */
+  #pipeline-terminal {
+    background-color: #1a1a1a;
+    color: #a6e22e;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 1rem;
+    overflow-y: scroll;
+    height: 350px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  #pipeline-terminal .term-line {
+    padding: 1px 0;
+  }
+
+  #pipeline-terminal .term-line.stderr {
+    color: #ef5350;
+  }
+
+  #pipeline-terminal .term-line.exit-success {
+    color: #66bb6a;
+    font-weight: bold;
+  }
+
+  #pipeline-terminal .term-line.exit-error {
+    color: #ef5350;
+    font-weight: bold;
+  }
+
+  #pipeline-terminal .term-line.system {
+    color: #8892b0;
+    font-style: italic;
+  }
+
+  #pipeline-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 12px;
+    min-height: 24px;
+  }
+
+  #pipeline-status-bar .status-indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--flag-grey);
+    flex-shrink: 0;
+  }
+
+  #pipeline-status-bar .status-indicator.running {
+    background: #66bb6a;
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  #pipeline-status-bar .status-text {
+    color: var(--text-muted);
+  }
+
+  #pipeline-status-bar .status-text.active {
+    color: #66bb6a;
+    font-weight: bold;
+  }
+
+  #pipeline-clear-btn {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    padding: 4px 10px;
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+
+  #pipeline-clear-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+
+  /* ===================================================================
      Responsive
      =================================================================== */
   @media (max-width: 768px) {
@@ -395,6 +638,13 @@
     .counts { margin-left: 0; }
     #stack-rank-table table { font-size: 11px; }
     #stack-rank-table th, #stack-rank-table td { padding: 4px; }
+    .main-layout { flex-direction: column; }
+    #debug-panel {
+      width: 100%;
+      min-width: 0;
+      max-height: 300px;
+      position: static;
+    }
   }
 </style>
 </head>
@@ -421,100 +671,141 @@
 </header>
 
 <!-- ================================================================ -->
-<!-- Manual AI Ingestion Platform -->
+<!-- Main Two-Column Layout -->
 <!-- ================================================================ -->
-<section id="ingestion-panel" class="panel ingestion-panel">
-  <h3>Manual AI Ingestion Platform</h3>
-  <div style="margin-bottom:10px;">
-    <input type="text" id="raw-job-url" placeholder="Paste LinkedIn Job URL here...">
-  </div>
-  <div style="margin-bottom:10px;">
-    <textarea id="raw-job-text" placeholder="Paste entire copied job text here..."></textarea>
-  </div>
-  <div>
-    <button id="harvest-raw-btn" type="button" class="ingestion-btn">Harvest via AI Engine</button>
-  </div>
-</section>
+<div class="main-layout">
+
+  <!-- Left Column — Core Panels -->
+  <div class="main-content">
+
+    <!-- Manual AI Ingestion Platform -->
+    <section id="ingestion-panel" class="panel ingestion-panel">
+      <h3>Manual AI Ingestion Platform</h3>
+      <div style="margin-bottom:10px;">
+        <input type="text" id="raw-job-url" placeholder="Paste LinkedIn Job URL here...">
+      </div>
+      <div style="margin-bottom:10px;">
+        <textarea id="raw-job-text" placeholder="Paste entire copied job text here..."></textarea>
+      </div>
+      <div>
+        <button id="harvest-raw-btn" type="button" class="ingestion-btn">Harvest via AI Engine</button>
+      </div>
+    </section>
+
+    <!-- Score Distribution Panel -->
+    <section id="score-distribution" class="panel">
+      <h3>Score Distribution</h3>
+      <div class="bars-container">
+        <div class="bar-row">
+          <span class="bar-label">1-3</span>
+          <div class="bar-track"><div class="bar-fill band-1-3" id="bar-1-3"></div></div>
+          <span class="bar-count" id="count-1-3">0</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label">4-5</span>
+          <div class="bar-track"><div class="bar-fill band-4-5" id="bar-4-5"></div></div>
+          <span class="bar-count" id="count-4-5">0</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label">6</span>
+          <div class="bar-track"><div class="bar-fill band-6" id="bar-6"></div></div>
+          <span class="bar-count" id="count-6">0</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label">7-8</span>
+          <div class="bar-track"><div class="bar-fill band-7-8" id="bar-7-8"></div></div>
+          <span class="bar-count" id="count-7-8">0</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label">9-10</span>
+          <div class="bar-track"><div class="bar-fill band-9-10" id="bar-9-10"></div></div>
+          <span class="bar-count" id="count-9-10">0</span>
+        </div>
+      </div>
+      <div id="score-stats" class="stats-line" style="display:none;"></div>
+    </section>
+
+    <!-- Stack Rank Table -->
+    <section id="stack-rank-table" class="panel">
+      <h3>Stack Rank</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Score</th>
+            <th>Flag</th>
+            <th>Company</th>
+            <th>Title</th>
+            <th>Location</th>
+            <th>Salary</th>
+            <th>Fit</th>
+            <th>Gap</th>
+            <th>R★</th>
+            <th>CL★</th>
+            <th>Links</th>
+          </tr>
+        </thead>
+        <tbody id="rank-tbody"></tbody>
+      </table>
+    </section>
+
+    <!-- Application History Panel -->
+    <section id="app-history" class="panel">
+      <h3>Application History</h3>
+      <div id="app-history-content"></div>
+    </section>
+
+    <!-- Activity Log -->
+    <section id="activity-log" class="panel">
+      <h3>Activity Log</h3>
+      <div id="log-entries"></div>
+    </section>
+
+    <!-- Pipeline Operations Center -->
+    <section id="pipeline-ops" class="panel pipeline-panel">
+      <h3>Pipeline Operations Center</h3>
+
+      <!-- Status bar -->
+      <div id="pipeline-status-bar">
+        <span class="status-indicator" id="pipeline-status-dot"></span>
+        <span class="status-text" id="pipeline-status-text">Idle</span>
+        <button id="pipeline-clear-btn" type="button">Clear Console</button>
+      </div>
+
+      <!-- Trigger buttons -->
+      <div class="pipeline-buttons">
+        <button id="pipeline-btn-score" type="button" class="pipeline-btn run-score">
+          <span class="spinner"></span>
+          &#9654; Run Score Engine
+        </button>
+        <button id="pipeline-btn-generate" type="button" class="pipeline-btn run-generate">
+          <span class="spinner"></span>
+          &#9654; Run Generation Engine
+        </button>
+        <button id="pipeline-btn-qa" type="button" class="pipeline-btn run-qa">
+          <span class="spinner"></span>
+          &#9654; Run Forensic Auditor
+        </button>
+      </div>
+
+      <!-- Terminal emulation viewport -->
+      <div id="pipeline-terminal">
+        <div class="term-line system">Pipeline terminal ready. Click a button to start.</div>
+      </div>
+    </section>
+
+  </div><!-- /.main-content -->
+
+  <!-- Right Column — Debug Console Sidebar -->
+  <section id="debug-panel">
+    <h3>System Debug Logs</h3>
+    <div id="debug-log-entries"></div>
+  </section>
+
+</div><!-- /.main-layout -->
 
 <!-- Toast Container -->
 <div id="toast-container"></div>
-
-<!-- ================================================================ -->
-<!-- Score Distribution Panel -->
-<!-- ================================================================ -->
-<section id="score-distribution" class="panel">
-  <h3>Score Distribution</h3>
-  <div class="bars-container">
-    <div class="bar-row">
-      <span class="bar-label">1-3</span>
-      <div class="bar-track"><div class="bar-fill band-1-3" id="bar-1-3"></div></div>
-      <span class="bar-count" id="count-1-3">0</span>
-    </div>
-    <div class="bar-row">
-      <span class="bar-label">4-5</span>
-      <div class="bar-track"><div class="bar-fill band-4-5" id="bar-4-5"></div></div>
-      <span class="bar-count" id="count-4-5">0</span>
-    </div>
-    <div class="bar-row">
-      <span class="bar-label">6</span>
-      <div class="bar-track"><div class="bar-fill band-6" id="bar-6"></div></div>
-      <span class="bar-count" id="count-6">0</span>
-    </div>
-    <div class="bar-row">
-      <span class="bar-label">7-8</span>
-      <div class="bar-track"><div class="bar-fill band-7-8" id="bar-7-8"></div></div>
-      <span class="bar-count" id="count-7-8">0</span>
-    </div>
-    <div class="bar-row">
-      <span class="bar-label">9-10</span>
-      <div class="bar-track"><div class="bar-fill band-9-10" id="bar-9-10"></div></div>
-      <span class="bar-count" id="count-9-10">0</span>
-    </div>
-  </div>
-  <div id="score-stats" class="stats-line" style="display:none;"></div>
-</section>
-
-<!-- ================================================================ -->
-<!-- Stack Rank Table -->
-<!-- ================================================================ -->
-<section id="stack-rank-table" class="panel">
-  <h3>Stack Rank</h3>
-  <table>
-    <thead>
-      <tr>
-        <th>Rank</th>
-        <th>Score</th>
-        <th>Flag</th>
-        <th>Company</th>
-        <th>Title</th>
-        <th>Location</th>
-        <th>Salary</th>
-        <th>Fit</th>
-        <th>Gap</th>
-        <th>R★</th>
-        <th>CL★</th>
-        <th>Links</th>
-      </tr>
-    </thead>
-    <tbody id="rank-tbody"></tbody>
-  </table>
-</section>
-
-<!-- ================================================================ -->
-<!-- Application History Panel -->
-<!-- ================================================================ -->
-<section id="app-history" class="panel">
-  <h3>Application History</h3>
-  <div id="app-history-content"></div>
-</section>
-
-<!-- ================================================================ -->
-<!-- Activity Log -->
-<!-- ================================================================ -->
-<section id="activity-log" class="panel">
-  <h3>Activity Log</h3>
-  <div id="log-entries"></div>
-</section>
 
 <!-- ================================================================ -->
 <!-- JavaScript — All Inline, No Dependencies -->
@@ -1112,38 +1403,56 @@ function populateFromState(state) {
 
 function init() {
   // Step 1: Fetch current state from server
-  fetch('/state')
-    .then(function(res) {
-      if (!res.ok) throw new Error('Server returned ' + res.status);
-      return res.json();
-    })
-    .then(function(state) {
-      populateFromState(state);
-      showBanner(null); // Clear any existing banner
-    })
-    .catch(function() {
-      showBanner('Server not running \u2014 start with: node server/server.js');
-      return; // Don't connect EventSource if server is down
-    });
+  try {
+    fetch('/state')
+      .then(function(res) {
+        if (!res.ok) throw new Error('Server returned ' + res.status);
+        return res.json();
+      })
+      .then(function(state) {
+        populateFromState(state);
+        showBanner(null);
+      })
+      .catch(function() {
+        showBanner('Server not running \u2014 start with: node server/server.js');
+      });
+  } catch (err) {
+    addDebugLog('init() Step 1 (state fetch) failed: ' + err.message, 'error');
+  }
 
   // Step 2: Connect to SSE stream
-  var evtSource = new EventSource('/events');
+  try {
+    var evtSource = new EventSource('/events');
 
-  evtSource.onmessage = function(e) {
-    try {
-      var event = JSON.parse(e.data);
-      handleEvent(event);
-    } catch (err) {
-      // Ignore parse errors in SSE stream
-    }
-  };
+    evtSource.onmessage = function(e) {
+      try {
+        var event = JSON.parse(e.data);
+        handleEvent(event);
+      } catch (parseErr) {
+        addDebugLog('init() SSE parse error: ' + parseErr.message, 'error');
+      }
+    };
 
-  evtSource.onerror = function() {
-    showBanner('Connection lost \u2014 reload to reconnect.');
-  };
+    evtSource.onerror = function() {
+      showBanner('Connection lost \u2014 reload to reconnect.');
+    };
+  } catch (err) {
+    addDebugLog('init() Step 2 (SSE connection) failed: ' + err.message, 'error');
+  }
 
   // Step 3: Wire the manual ingestion form
-  wireIngestionForm();
+  try {
+    wireIngestionForm();
+  } catch (err) {
+    addDebugLog('init() Step 3 (ingestion form) failed: ' + err.message, 'error');
+  }
+
+  // Step 4: Wire the pipeline controls center
+  try {
+    wirePipelineControls();
+  } catch (err) {
+    addDebugLog('init() Step 4 (pipeline controls) failed: ' + err.message, 'error');
+  }
 }
 
 // Wait for DOM to be ready
@@ -1151,6 +1460,35 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
   init();
+}
+
+/* ------------------------------------------------------------------ */
+/* Debug Console — addDebugLog(message, type)                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Append a color-coded line to the System Debug Logs panel.
+ * No bare console.* calls — all telemetry goes to the UI panel only.
+ *
+ * @param {string} message - The log message text.
+ * @param {string} [type='info'] - One of 'info', 'error', 'raw', 'success'.
+ */
+function addDebugLog(message, type) {
+  var panel = document.getElementById('debug-log-entries');
+  if (!panel) return;
+
+  var now = new Date();
+  var time = pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
+
+  var div = document.createElement('div');
+  div.className = 'debug-log-entry log-' + (type || 'info');
+
+  div.innerHTML = '<span class="log-time">[' + time + ']</span> ' + escapeHtml(message);
+
+  panel.appendChild(div);
+
+  // Auto-scroll to bottom
+  panel.scrollTop = panel.scrollHeight;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1181,6 +1519,7 @@ function wireIngestionForm() {
   var textInput = document.getElementById('raw-job-text');
 
   if (!btn) {
+    addDebugLog('Ingestion form init failed — missing harvest button.', 'error');
     alert('ERR: Ingestion form initialization failed \u2014 missing harvest button.');
     return;
   }
@@ -1188,6 +1527,7 @@ function wireIngestionForm() {
   if (!urlInput || !textInput) {
     btn.textContent = 'ERR: Missing input fields';
     btn.disabled = true;
+    addDebugLog('Ingestion form init failed — missing input fields.', 'error');
     return;
   }
 
@@ -1206,6 +1546,8 @@ function wireIngestionForm() {
     urlInput.disabled = true;
     textInput.disabled = true;
 
+    addDebugLog('Sending raw text to backend...', 'info');
+
     try {
       var res = await fetch('/harvest-raw', {
         method: 'POST',
@@ -1215,16 +1557,29 @@ function wireIngestionForm() {
 
       if (res.status === 200) {
         var data = await res.json();
+        addDebugLog('AI Saved: ' + (data.company || 'Company') + ' \u2014 ' + (data.title || 'Title'), 'success');
         showToast('AI Saved: ' + (data.company || 'Company') + ' \u2014 ' + (data.title || 'Title'), 'success');
         urlInput.value = '';
         textInput.value = '';
       } else if (res.status === 409) {
+        addDebugLog('Duplicate URL — this job has already been saved.', 'error');
         showToast('Duplicate URL \u2014 this job has already been saved.', 'warning');
       } else {
         var errData = await res.json().catch(function() { return {}; });
+        // Print detailed error info into the debug panel when a 500 occurs
+        if (errData.errorDetails) {
+          addDebugLog('Server error: ' + (errData.message || 'Harvest failed'), 'error');
+          addDebugLog('Error details: ' + errData.errorDetails, 'error');
+          if (errData.rawSnippet) {
+            addDebugLog('Raw snippet: ' + errData.rawSnippet, 'raw');
+          }
+        } else {
+          addDebugLog('Error: ' + (errData.message || 'Harvest failed. Check server logs.'), 'error');
+        }
         showToast('Error: ' + (errData.message || 'Harvest failed. Check server logs.'), 'error');
       }
     } catch (err) {
+      addDebugLog('Network error — is the server running?', 'error');
       showToast('Network error \u2014 is the server running?', 'error');
     } finally {
       // Restore inputs
@@ -1234,6 +1589,275 @@ function wireIngestionForm() {
       textInput.disabled = false;
     }
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Pipeline Operations Center — Live Script Control Panel               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Task metadata for the three pipeline operations.
+ */
+var PIPELINE_TASKS = {
+  score:    { btnId: 'pipeline-btn-score',    label: 'Score Engine' },
+  generate: { btnId: 'pipeline-btn-generate', label: 'Generation Engine' },
+  qa:       { btnId: 'pipeline-btn-qa',       label: 'Forensic Auditor' },
+};
+
+/** @type {EventSource|null} */
+var pipelineEventSource = null;
+
+/** @type {boolean} */
+var pipelineRunning = false;
+
+/**
+ * DOM references for pipeline controls (lazily resolved).
+ */
+var pipelineTerminal = null;
+var pipelineStatusDot = null;
+var pipelineStatusText = null;
+var pipelineClearBtn = null;
+
+/**
+ * Resolve pipeline DOM references once.
+ */
+function resolvePipelineDom() {
+  if (!pipelineTerminal) {
+    pipelineTerminal = document.getElementById('pipeline-terminal');
+    pipelineStatusDot = document.getElementById('pipeline-status-dot');
+    pipelineStatusText = document.getElementById('pipeline-status-text');
+    pipelineClearBtn = document.getElementById('pipeline-clear-btn');
+  }
+}
+
+/**
+ * Set the pipeline status indicator (dot color + text).
+ * @param {string} state - 'idle' or 'running'.
+ * @param {string} [message] - Optional status message.
+ */
+function setPipelineStatus(state, message) {
+  resolvePipelineDom();
+  if (!pipelineStatusDot || !pipelineStatusText) return;
+
+  if (state === 'running') {
+    pipelineStatusDot.className = 'status-indicator running';
+    pipelineStatusText.className = 'status-text active';
+    pipelineStatusText.textContent = message || 'Running...';
+  } else {
+    pipelineStatusDot.className = 'status-indicator';
+    pipelineStatusText.className = 'status-text';
+    pipelineStatusText.textContent = message || 'Idle';
+  }
+}
+
+/**
+ * Enable or disable all pipeline buttons.
+ * @param {boolean} disabled - true to disable, false to enable.
+ */
+function setPipelineButtonsDisabled(disabled) {
+  for (var key in PIPELINE_TASKS) {
+    if (PIPELINE_TASKS.hasOwnProperty(key)) {
+      var btn = document.getElementById(PIPELINE_TASKS[key].btnId);
+      if (btn) {
+        btn.disabled = disabled;
+        if (disabled) {
+          btn.classList.add('running');
+        } else {
+          btn.classList.remove('running');
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Append a line to the pipeline terminal viewport.
+ * @param {string} text - The text to append.
+ * @param {string} [className=''] - Optional CSS class for styling.
+ */
+function appendTerminalLine(text, className) {
+  resolvePipelineDom();
+  if (!pipelineTerminal) return;
+
+  var div = document.createElement('div');
+  div.className = 'term-line' + (className ? ' ' + className : '');
+  div.textContent = text;
+  pipelineTerminal.appendChild(div);
+
+  // Strict scroll-lock: always keep the latest rows visible
+  pipelineTerminal.scrollTop = pipelineTerminal.scrollHeight;
+}
+
+/**
+ * Clear all content from the pipeline terminal viewport.
+ */
+function clearPipelineTerminal() {
+  resolvePipelineDom();
+  if (!pipelineTerminal) return;
+  pipelineTerminal.innerHTML = '';
+}
+
+/**
+ * Start the pipeline process by connecting to the SSE log stream
+ * and POSTing the task to the backend.
+ * @param {string} task - 'score', 'generate', or 'qa'.
+ */
+function startPipelineTask(task) {
+  if (pipelineRunning) return;
+
+  var taskInfo = PIPELINE_TASKS[task];
+  if (!taskInfo) return;
+
+  resolvePipelineDom();
+
+  // Clear terminal and disable buttons
+  clearPipelineTerminal();
+  appendTerminalLine('Starting ' + taskInfo.label + '...', 'system');
+  setPipelineStatus('running', taskInfo.label + ' running...');
+  setPipelineButtonsDisabled(true);
+  pipelineRunning = true;
+
+  // Close any existing SSE connection
+  if (pipelineEventSource) {
+    pipelineEventSource.close();
+    pipelineEventSource = null;
+  }
+
+  // Connect to the pipeline log SSE stream
+  pipelineEventSource = new EventSource('/api/pipeline/logs');
+
+  pipelineEventSource.onmessage = function(e) {
+    try {
+      var data = JSON.parse(e.data);
+
+      // Handle connection event
+      if (data.type === 'connected') {
+        appendTerminalLine('[Connected to log stream]', 'system');
+        return;
+      }
+
+      // Handle process exit
+      if (data.type === 'exit') {
+        var exitMsg = 'Process exited with code ' + data.code;
+        if (data.code === 0) {
+          appendTerminalLine(exitMsg, 'exit-success');
+        } else {
+          appendTerminalLine(exitMsg, 'exit-error');
+        }
+        finishPipelineTask(data.code === 0);
+        return;
+      }
+
+      // Handle process error
+      if (data.type === 'error') {
+        appendTerminalLine('Error: ' + (data.text || 'Unknown error'), 'exit-error');
+        finishPipelineTask(false);
+        return;
+      }
+
+      // Handle stdout/stderr chunks
+      if (data.text) {
+        var className = data.stream === 'stderr' ? 'stderr' : '';
+        // Split multi-line chunks into individual lines
+        var lines = data.text.split('\n');
+        for (var i = 0; i < lines.length; i++) {
+          if (lines[i].length > 0) {
+            appendTerminalLine(lines[i], className);
+          }
+        }
+      }
+    } catch (err) {
+      // Ignore parse errors in SSE stream
+    }
+  };
+
+  pipelineEventSource.onerror = function() {
+    appendTerminalLine('[SSE connection lost — reconnecting...]', 'system');
+  };
+
+  // POST to start the task
+  addDebugLog('Pipeline: starting ' + task + '...', 'info');
+
+  fetch('/api/pipeline/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task: task }),
+  })
+    .then(function(res) {
+      if (res.status === 202) {
+        addDebugLog('Pipeline: ' + task + ' started successfully', 'success');
+      } else if (res.status === 409) {
+        return res.json().then(function(data) {
+          appendTerminalLine('Error: ' + (data.error || 'Process already running'), 'exit-error');
+          finishPipelineTask(false);
+        });
+      } else {
+        return res.json().then(function(data) {
+          appendTerminalLine('Error: ' + (data.error || 'Failed to start task'), 'exit-error');
+          finishPipelineTask(false);
+        });
+      }
+    })
+    .catch(function(err) {
+      appendTerminalLine('Network error: ' + err.message, 'exit-error');
+      finishPipelineTask(false);
+    });
+}
+
+/**
+ * Clean up after a pipeline task finishes — re-enable buttons,
+ * close SSE connection, update status.
+ * @param {boolean} success - Whether the task completed successfully.
+ */
+function finishPipelineTask(success) {
+  // Close the SSE connection
+  if (pipelineEventSource) {
+    pipelineEventSource.close();
+    pipelineEventSource = null;
+  }
+
+  setPipelineButtonsDisabled(false);
+  pipelineRunning = false;
+  setPipelineStatus('idle', success ? 'Completed' : 'Failed');
+  addDebugLog('Pipeline: ' + (success ? 'completed' : 'failed'), success ? 'success' : 'error');
+}
+
+/**
+ * Wire up the pipeline control buttons and clear button.
+ */
+function wirePipelineControls() {
+  // Score Engine button
+  var scoreBtn = document.getElementById('pipeline-btn-score');
+  if (scoreBtn) {
+    scoreBtn.addEventListener('click', function() {
+      startPipelineTask('score');
+    });
+  }
+
+  // Generation Engine button
+  var genBtn = document.getElementById('pipeline-btn-generate');
+  if (genBtn) {
+    genBtn.addEventListener('click', function() {
+      startPipelineTask('generate');
+    });
+  }
+
+  // Forensic Auditor button
+  var qaBtn = document.getElementById('pipeline-btn-qa');
+  if (qaBtn) {
+    qaBtn.addEventListener('click', function() {
+      startPipelineTask('qa');
+    });
+  }
+
+  // Clear Console button
+  resolvePipelineDom();
+  if (pipelineClearBtn) {
+    pipelineClearBtn.addEventListener('click', function() {
+      clearPipelineTerminal();
+      appendTerminalLine('Pipeline terminal cleared.', 'system');
+    });
+  }
 }
 
 </script>
