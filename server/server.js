@@ -4,9 +4,10 @@ require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const { parseJobFile, sanitizeForFilename, extractLinkedInJobId } = require('../src/models/job');
-const { readJobFiles, writeJobFile, readApplications } = require('../src/lib/fileStore');
+const { readJobFiles, writeJobFile, readApplications, writeApplications } = require('../src/lib/fileStore');
+const { formatDateString } = require('../src/lib/dateUtils');
 const { callDeepSeek } = require('../src/lib/deepseek');
 const logger = require('../src/lib/logger');
 
@@ -86,11 +87,13 @@ function createApp(jobsDir) {
     }
 
     try {
-      // Read applications.json, keep last 10 entries
+      // Read applications.json — load full collection into memory
       const projectRoot = path.resolve(__dirname, '..');
       const records = await readApplications(projectRoot);
-      state.applicationHistory = records.slice(-10);
-      logger.info('[server]', `Hydrated ${state.applicationHistory.length} application history entries`);
+      // Part 1: Deduplicate via ID-keyed Map — preserve "applied" over "generated"
+      state.applicationHistory = deduplicateApplications(records);
+      const dupCount = records.length - state.applicationHistory.length;
+      logger.info('[server]', `Hydrated ${state.applicationHistory.length} application history entries (${dupCount > 0 ? dupCount + ' duplicates merged' : '0 duplicates'})`);
     } catch {
       // applications.json may not exist yet — that's fine
       logger.info('[server]', 'No applications.json found — starting with empty history');
@@ -118,6 +121,39 @@ function createApp(jobsDir) {
   // ------------------------------------------------------------------
   // Helpers
   // ------------------------------------------------------------------
+
+  /**
+   * Deduplicate application records via ID-keyed Map.
+   * If an ID collision is detected, the record with status "applied"
+   * takes precedence over a "generated" entry, preserving the applied
+   * date and stateful metadata.
+   *
+   * @param {Array} records - Array of ApplicationRecord objects.
+   * @returns {Array} Deduplicated array.
+   */
+  function deduplicateApplications(records) {
+    const map = new Map();
+    for (const record of records) {
+      const id = record.id;
+      if (!id) continue;
+      if (map.has(id)) {
+        const existing = map.get(id);
+        // Prefer the 'applied' record — preserve its stateful metadata
+        if (existing.status === 'applied' && record.status !== 'applied') {
+          continue; // Keep the existing applied record
+        }
+        if (record.status === 'applied' && existing.status !== 'applied') {
+          map.set(id, record); // New applied record replaces generated
+        } else {
+          // Same status or neither applied — merge fields
+          map.set(id, { ...existing, ...record });
+        }
+      } else {
+        map.set(id, record);
+      }
+    }
+    return Array.from(map.values());
+  }
 
   /**
    * Broadcast a payload to all connected SSE clients.
@@ -549,6 +585,80 @@ function createApp(jobsDir) {
   });
 
   // ------------------------------------------------------------------
+  // POST /api/applications/open-folder — Open output folder in Explorer
+  // ------------------------------------------------------------------
+  app.post('/api/applications/open-folder', async (req, res) => {
+    try {
+      const { id } = req.body || {};
+      if (!id) {
+        res.status(400).json({ error: 'Missing application id' });
+        return;
+      }
+
+      const records = await readApplications(process.cwd());
+      const record = records.find(r => r.id === id);
+      if (!record) {
+        res.status(404).json({ error: 'Application record not found' });
+        return;
+      }
+
+      const outputPath = record.outputPath;
+      if (!outputPath) {
+        res.status(400).json({ error: 'Application record has no outputPath' });
+        return;
+      }
+
+      exec(`explorer.exe "${outputPath}"`, (err) => {
+        if (err) {
+          logger.error('[server]', `Failed to open folder: ${err.message}`);
+        }
+      });
+
+      res.json({ ok: true });
+    } catch (err) {
+      logger.error('[server]', `Open-folder error: ${err.message}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // POST /api/applications/apply — Mark an application as applied
+  // ------------------------------------------------------------------
+  app.post('/api/applications/apply', async (req, res) => {
+    try {
+      const { id } = req.body || {};
+      if (!id) {
+        res.status(400).json({ error: 'Missing application id' });
+        return;
+      }
+
+      const records = await readApplications(process.cwd());
+      const idx = records.findIndex(r => r.id === id);
+      if (idx === -1) {
+        res.status(404).json({ error: 'Application record not found' });
+        return;
+      }
+
+      const record = records[idx];
+      record.status = 'applied';
+      record.dateApplied = formatDateString(new Date());
+
+      // Part 1: Deduplicate before writing — merge duplicates preserving "applied"
+      const deduped = deduplicateApplications(records);
+      await writeApplications(process.cwd(), deduped);
+
+      // Refresh in-memory application history — deduplicated collection
+      state.applicationHistory = deduped;
+      logger.info('[server]', `Marked applied: ${record.id} — status=applied dateApplied=${record.dateApplied}`);
+
+      res.json(record);
+    } catch (err) {
+      logger.error('[server]', `Apply error: ${err.message}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ------------------------------------------------------------------
   // POST /api/pipeline/run — Spawn a pipeline script via npm run
   // ------------------------------------------------------------------
   app.post('/api/pipeline/run', (req, res) => {
@@ -556,7 +666,7 @@ function createApp(jobsDir) {
       const { task } = req.body || {};
 
       // Validate task
-      const VALID_TASKS = ['score', 'generate', 'qa'];
+      const VALID_TASKS = ['score', 'generate', 'qa', 'cleanup'];
       if (!task || !VALID_TASKS.includes(task)) {
         res.status(400).json({ error: `Invalid task. Must be one of: ${VALID_TASKS.join(', ')}` });
         return;
@@ -604,8 +714,36 @@ function createApp(jobsDir) {
         }
       });
 
-      child.on('close', (code) => {
+      child.on('close', async (code) => {
         currentProcess = null;
+
+        // Part 3: On successful cleanup, reset in-memory batches and broadcast
+        if (code === 0 && task === 'cleanup') {
+          state.scored = [];
+          state.generated = [];
+          state.date = null;
+          state.phase = 'idle';
+          broadcast({ type: 'state', data: state });
+          logger.info('[server]', `Cleanup complete — in-memory batches reset, broadcast state snapshot`);
+        }
+
+        // Re-hydrate application history from disk after a successful generate pass
+        if (code === 0 && task === 'generate') {
+          try {
+            logger.info('[server]', 'Generation completed successfully. Re-hydrating application history from disk...');
+            const rawApps = await readApplications(process.cwd());
+            state.applicationHistory = deduplicateApplications(rawApps);
+            state.phase = 'idle';
+            // Broadcast the updated state containing the new application history cards
+            broadcast({ type: 'state', data: state });
+            logger.info('[server]', `Application history re-hydrated: ${state.applicationHistory.length} records`);
+          } catch (err) {
+            logger.error('[server]', `Failed to re-hydrate application history: ${err.message}`);
+            state.phase = 'idle';
+            broadcast({ type: 'state', data: state });
+          }
+        }
+
         const exitPayload = 'data: ' + JSON.stringify({ type: 'exit', code }) + '\n\n';
         for (let i = pipelineClients.length - 1; i >= 0; i--) {
           try {

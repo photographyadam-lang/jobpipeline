@@ -1,6 +1,6 @@
 # Job Pipeline — Production Runbook
 
-> **Version:** 1.1
+> **Version:** 1.2
 > **Last updated:** 2026-06-03
 > **Maintainer:** Pipeline operator
 
@@ -14,16 +14,18 @@
 4. [Stage 2: Prioritization (Scoring)](#4-stage-2-prioritization-scoring)
 5. [Stage 3: Customization (Generation)](#5-stage-3-customization-generation)
 6. [Stage 4: Archiving (Cleanup)](#6-stage-4-archiving-cleanup)
-7. [Cross-Day Workflow](#7-cross-day-workflow)
+7. [Dashboard Pipeline Controls](#7-dashboard-pipeline-controls)
 8. [Application Tracking](#8-application-tracking)
-9. [Troubleshooting Protocols](#9-troubleshooting-protocols)
-10. [File Reference](#10-file-reference)
+9. [Cross-Day Workflow](#9-cross-day-workflow)
+10. [Quality Assurance](#10-quality-assurance)
+11. [Troubleshooting Protocols](#11-troubleshooting-protocols)
+12. [File Reference](#12-file-reference)
 
 ---
 
 ## 1. Overview
 
-The pipeline processes LinkedIn job descriptions through four stages:
+The pipeline processes LinkedIn job descriptions through four main stages:
 
 | Stage | Script | Purpose |
 |-------|--------|---------|
@@ -32,9 +34,17 @@ The pipeline processes LinkedIn job descriptions through four stages:
 | Customization | `node generate.js` | Generate resumes, cover letters, quality ratings |
 | Archiving | `node cleanup.js` | Archive completed job files for the day |
 
+Additional utilities:
+| Purpose | Script |
+|---------|--------|
+| Quality Assurance | `npm run qa` |
+| Application Tracking | Dashboard UI (not a CLI script) |
+
 ### Quick start
 
 ```powershell
+cd C:\Users\adam\OneDrive\Documents\projects\jobs-pipeline
+
 # Terminal 1 — Start the server
 node server/server.js
 
@@ -63,6 +73,8 @@ PIPELINE_PORT=3000
 
 **Never commit `.env` to version control.** It is listed in `.gitignore`. Use `.env.example` as a reference template — copy it to `.env` and fill in your real values.
 
+The `PIPELINE_PORT` env var controls which port the server listens on. Default is `3000`. If you change it, update your bookmarklet URL and dashboard links accordingly.
+
 ### 2.2 Config files
 
 The following files must exist in `config/`. They are human-authored and are never created or modified by the pipeline agent.
@@ -75,7 +87,14 @@ The following files must exist in `config/`. They are human-authored and are nev
 | `config/quality_prompt.md` | System prompt for quality rating | `generate.js` |
 | `config/adam_buteux_career.md` | Career profile used by all prompts | Both |
 | `config/pillar_library.md` | Bullet-point pillar library | `generate.js` |
-| `config/resume_format_spec.md` | Resume format reference (informational) | Reference only |
+| `config/qa_prompt.md` | System prompt for QA evaluation | `src/qa.js` |
+
+Additional reference files (not required by any script):
+| File | Purpose |
+|------|---------|
+| `config/adam_buteux_pillar_library.md` | Alternate pillar library format |
+| `config/Writing_Style_Guide.md` | Writing style reference |
+| `config/authenticity-SKILL.md` | Authenticity skill definition |
 
 If any required config file is missing, the CLI script exits with code 1 and lists all missing files.
 
@@ -119,7 +138,7 @@ node server/server.js
 There are two ways to harvest job descriptions:
 
 1. **Bookmarklet (automatic):** Click a bookmarklet on a LinkedIn job page to extract and save structured data.
-2. **Manual AI Ingestion (alternative):** Paste a URL and raw job text into the dashboard form. DeepSeek parses the text into structured fields.
+2. **Manual AI Ingestion (alternative):** Paste a URL and raw job text into the dashboard form. DeepSeek parses the text into structured fields. The description text is stitched locally (not from AI output) to avoid truncation on long job descriptions.
 
 Both methods write job files to `jobs/` in the same format and broadcast `job_harvested` events to the dashboard.
 
@@ -133,6 +152,8 @@ Expected output:
 ```
 [TIMESTAMP] [server] Pipeline server listening on port 3000
 ```
+
+(If `PIPELINE_PORT` is set to a different value, the port number will reflect that.)
 
 Open [http://localhost:3000/dashboard](http://localhost:3000/dashboard) in your browser. You should see the dashboard with a "Server running" banner showing `idle` phase.
 
@@ -190,8 +211,8 @@ When the bookmarklet is unavailable (LinkedIn DOM changes, mobile, or blocked), 
 |------|-------------|
 | 1 | Server receives `POST /harvest-raw` with `{ url, rawText }` |
 | 2 | URL is checked against the in-memory duplicate cache (returns `409` if already harvested) |
-| 3 | DeepSeek is called with a data-extraction system prompt to parse the raw text into `{ title, company, location, employmentType, salary, description }` |
-| 4 | The LinkedIn Job ID is extracted from the URL via regex |
+| 3 | LinkedIn Job ID is extracted from the URL via regex |
+| 4 | DeepSeek is called with a data-extraction system prompt to parse the raw text into `{ title, company, location, employmentType, salary }` — **description is NOT extracted from AI**; the raw text is stitched locally to avoid truncation |
 | 5 | A job file is written to `jobs/` in the same format as the bookmarklet |
 | 6 | A `job_harvested` event is broadcast to the dashboard |
 
@@ -217,7 +238,7 @@ dir jobs\
 # 2026-06-03-Meridian-Health-Systems-Senior-Privacy-Manager.md
 ```
 
-Each `.md` file follows the job file format (see Section 8 of the specification).
+Each `.md` file follows the job file format with a `# Title` heading, `## Metadata` section, and `## Job Description` section.
 
 ---
 
@@ -237,9 +258,11 @@ This command:
 5. Loads config files: `scoring_prompt.md` (system prompt) and `adam_buteux_career.md` (career profile)
 6. Scores each unique job via **sequential** DeepSeek API calls (no `Promise.all` — rate limits are real)
 7. Ranks jobs by score (descending) with dense ranking and action flag assignment
-8. Computes statistical distribution
+8. Computes statistical distribution (buckets: `1-3`, `4-5`, `6-7`, `8-10`)
 9. Broadcasts real-time SSE events (`scoring_started`, `job_scored`, `scoring_complete`)
 10. Writes `stack_rank_YYYY-MM-DD.md` to `resumes/YYYY-MM-DD/`
+
+**Errors during scoring:** If a DeepSeek call fails for an individual job (timeout, API error, parse error), that job is skipped and a `job_skipped` event is broadcast. The pipeline continues with the remaining jobs.
 
 ### 4.2 Understand the output
 
@@ -257,7 +280,7 @@ Each job entry includes:
 |-------|---------|
 | Rank | 1-based position in stack (dense ranking — ties share rank) |
 | Score | 1–10 from DeepSeek |
-| Action Flag | 🔴 `DEEP_TAILOR` (top 4), 🟡 `AUTO_GENERATED` (5+, score ≥ 6), ⚪ `NO DOCS` (5+, score < 6) |
+| Action Flag | 🔴 `DEEP TAILOR` (top 4), 🟡 `AUTO-GENERATED` (5+, score ≥ 6), ⚪ `NO DOCS` (5+, score < 6) |
 | Fit | 2-sentence match signal from DeepSeek |
 | Gap | 1-sentence identified gap |
 
@@ -277,7 +300,7 @@ While scoring runs, the dashboard updates in real time:
 - Phase indicator shows `scoring`
 - Score distribution bars update per job
 - Stack rank table builds row by row
-- Activity log shows each `scoring_started`, `job_scored`, `scoring_complete` event
+- Activity log shows each event (`scoring_started`, `job_scored`, `job_skipped`, `scoring_complete`)
 
 After `scoring_complete`:
 - Review the distribution — if most jobs cluster in the 1–3 range, your career profile may need updating
@@ -305,11 +328,9 @@ If all files were malformed, it also exits with code 0:
 [TIMESTAMP] [score] All job files were malformed — nothing to score.
 ```
 
-### 4.6 Failed or skipped jobs
+### 4.6 No jobs successfully scored
 
-If a DeepSeek call fails for an individual job (timeout, API error, parse error), that job is skipped and a `job_skipped` event is broadcast. The pipeline continues with the remaining jobs.
-
-If no jobs are successfully scored, the script exits with code 0:
+If all jobs encountered errors during scoring, the script exits with code 0:
 
 ```
 [TIMESTAMP] [score] No jobs were successfully scored.
@@ -330,17 +351,17 @@ This command:
 1. **Loads config files:** `resume_prompt.md`, `cover_letter_prompt.md`, `quality_prompt.md`, `adam_buteux_career.md`, `pillar_library.md`
 2. **Reads the stack rank file** for today's date via `fileStore.readStackRank()`
 3. **Parses qualifying jobs** from the stack rank (`DEEP_TAILOR` and `AUTO_GENERATED` only)
-4. **I/O optimization — reads `applications.json` ONCE** before the main processing loop (never inside the loop)
+4. **I/O optimization — reads `applications.json` ONCE** before the main loop (never inside the loop)
 5. **I/O optimization — reads all job files ONCE** into an in-memory `Map` keyed by filename (never inside the loop)
 6. For each qualifying job in a **sequential** loop:
    - Looks up the source job content from the in-memory `Map` by `sourceFilename`
    - Parses the job file to get the full `JobFile` object
-   - Extracts fitSignal and gap from the stack rank markdown (parsed from `**Fit:**` / `**Gap:**` fields)
+   - Extracts `fitSignal` and `gap` from the raw stack rank markdown using regex on `**Fit:**` / `**Gap:**` patterns
    - Builds a ScoredJob-like object combining stack rank data + job file data
    - Checks if output directory already exists (idempotent skip)
    - **Call 1:** Generates a tailored resume via DeepSeek (maxTokens: 2000, timeout: 60s)
-   - **Call 2:** Generates a tailored cover letter via DeepSeek (maxTokens: 800, timeout: 60s)
-   - **Call 3:** Rates quality of both documents via DeepSeek (maxTokens: 200, timeout: 30s)
+   - **Call 2:** Generates a tailored cover letter via DeepSeek (maxTokens: 800, timeout: 60s) — on failure, sets `coverLetterContent` to `null` and continues
+   - **Call 3:** Rates quality of both documents via DeepSeek (maxTokens: 200, timeout: 30s) — on failure, sets quality fields to `null` and continues
    - Writes `resume.md` and `cover_letter.md` to the output directory
    - Writes `submission_record.md` with metadata
    - Accumulates an `ApplicationRecord` into an in-memory array
@@ -368,7 +389,7 @@ resumes/2026-06-03/Meridian-Health-Systems-Senior-Privacy-Manager/
 - Pillars selected for the resume
 - Cover letter structure (paragraphs used)
 - Quality assessments (R★/CL★ scores)
-- Application status (initially empty)
+- Application status (initially `generated`)
 
 ### 5.3 Quality scores
 
@@ -452,7 +473,7 @@ npm run cleanup
 ```
 
 This command:
-1. Checks if `jobs/` has any `.md` files
+1. Checks if `jobs/` has any `.md` files — if empty, exits with code 0
 2. Creates `archive/YYYY-MM-DD/` (appends to existing directory if today is a second run)
 3. Moves all `.md` files from `jobs/` to `archive/YYYY-MM-DD/`
 4. Logs the count of files archived
@@ -461,6 +482,8 @@ Expected output:
 ```
 [TIMESTAMP] [cleanup] Archived 12 files to archive/2026-06-03/
 ```
+
+**Note:** Archive goes to `archive/` at the project root level, **not** `jobs/archive/`.
 
 ### 6.2 Verify
 
@@ -490,9 +513,87 @@ node cleanup.js     # Stage 4 — archive job files
 # Ctrl+C the server in Terminal 1
 ```
 
+**Important:** Run `generate.js` **before** `cleanup.js`. The generate script needs the original job files in `jobs/` to look up job descriptions. If you archive first, generate will skip jobs with "source file not found" warnings.
+
 ---
 
-## 7. Cross-Day Workflow
+## 7. Dashboard Pipeline Controls
+
+The dashboard includes built-in buttons to run pipeline stages directly from the UI.
+
+### 7.1 Available controls
+
+| Button | Action | Equivalent CLI |
+|--------|--------|---------------|
+| **Run Score** | Spawns `npm run score` as a child process | `node score.js` |
+| **Run Generate** | Spawns `npm run generate` as a child process | `node generate.js` |
+| **Run QA** | Spawns `npm run qa` as a child process | `node src/qa.js` |
+
+### 7.2 How it works
+
+1. Click the button in the dashboard's "Pipeline Controls" section
+2. The server spawns the script as a child process via `child_process.spawn`
+3. Live stdout/stderr output appears in a terminal-like log panel on the dashboard
+4. Only one pipeline process may run at a time — clicking a second button while one is running returns a `409 Conflict` error
+5. On process exit, the exit code is displayed
+
+### 7.3 When to use dashboard controls vs. CLI
+
+| Scenario | Recommendation |
+|----------|---------------|
+| First run of the day | CLI (you're already in the terminal) |
+| Quick re-score after fixing a job file | Dashboard button |
+| Running generate after scoring from CLI | Either works |
+| QA evaluation | Dashboard button or `npm run qa` |
+| Debugging (need to see full output) | CLI (terminal output is persistent) |
+
+---
+
+## 8. Application Tracking
+
+Application status tracking is handled through the dashboard UI, not a CLI script.
+
+### 8.1 View application history
+
+After generation, the dashboard shows your application history in a table at the bottom of the page. Each row includes:
+- Company and title
+- Score and action flag
+- Quality scores (R★/CL★)
+- Current status
+- Date generated
+- Date applied (if applicable)
+
+### 8.2 Mark an application as applied
+
+1. From the dashboard, find the application in the "Application History" section
+2. Click the **"Mark Applied"** button next to the entry
+3. This sends `POST /api/applications/apply` with the application `id`
+4. The server updates `applications.json`:
+   - Sets `status` to `"applied"`
+   - Sets `dateApplied` to today's date
+5. The dashboard refreshes to show the updated status
+
+### 8.3 Open output folder
+
+Click the **"Open Folder"** button next to any application entry in the dashboard. This:
+1. Sends `POST /api/applications/open-folder` with the application `id`
+2. The server looks up the `outputPath` from `applications.json`
+3. Opens the folder in Windows Explorer
+
+### 8.4 Valid statuses
+
+| Status | Meaning |
+|--------|---------|
+| `generated` | Documents created, not yet submitted |
+| `applied` | Application submitted |
+| `interviewing` | In interview process |
+| `rejected` | Application rejected |
+| `offer` | Offer received |
+| `withdrawn` | Application withdrawn |
+
+---
+
+## 9. Cross-Day Workflow
 
 ### Scenario: You scored yesterday but didn't generate
 
@@ -519,61 +620,41 @@ node generate.js            # Fails — no stack rank for today
 node generate.js --date=2026-05-28  # Works — reads yesterday's stack rank
 ```
 
----
+### Scenario: You need job files after cleanup
 
-## 8. Application Tracking
+If `cleanup.js` has already run but you need to re-generate:
 
-### 8.1 Track application status
-
-```powershell
-npm run apply
-```
-
-Displays all entries with `status === 'generated'`:
-
-```
-[1] Meridian Health Systems — Senior Privacy Manager | Score: 8/10 | Generated: 2026-06-03 | Status: generated
-[2] Vantara Financial — AI Governance Analyst | Score: 6/10 | Generated: 2026-06-03 | Status: generated
-
-Enter number (1-N) to update, or q to quit:
-```
-
-### 8.2 Update status
-
-Select a number, then enter the new status:
-
-```
-New status (applied/interviewing/rejected/offer/withdrawn): applied
-Method (LinkedIn Easy Apply / company portal / email / referral): LinkedIn Easy Apply
-Notes (Enter to skip):
-```
-
-When status is set to `applied`, the `dateApplied` field is automatically populated.
-
-### 8.3 View all entries
-
-```powershell
-npm run apply -- --all
-```
-
-Shows all entries regardless of status, including those already marked as applied, rejected, etc.
-
-### 8.4 Valid statuses
-
-| Status | Meaning |
-|--------|---------|
-| `generated` | Documents created, not yet submitted |
-| `applied` | Application submitted |
-| `interviewing` | In interview process |
-| `rejected` | Application rejected |
-| `offer` | Offer received |
-| `withdrawn` | Application withdrawn |
+1. Restore files: Copy from `archive/YYYY-MM-DD/` back to `jobs/`
+2. Then run `node generate.js --date=YYYY-MM-DD`
 
 ---
 
-## 9. Troubleshooting Protocols
+## 10. Quality Assurance
 
-### 9.1 Missing API key
+### 10.1 Run QA evaluation
+
+```powershell
+npm run qa
+```
+
+This command:
+1. Reads the most recent stack rank and generated documents from `resumes/`
+2. Uses `config/qa_prompt.md` as the DeepSeek system prompt
+3. Evaluates each generated document for quality, accuracy, and completeness
+4. Produces a QA assessment report
+5. Broadcasts a `qa_complete` SSE event if the server is running
+
+### 10.2 When to run QA
+
+- After generation is complete, before submitting applications
+- To check if resume/cover letter quality needs improvement
+- As a pre-flight check before marking applications as applied
+
+---
+
+## 11. Troubleshooting Protocols
+
+### 11.1 Missing API key
 
 **Symptom:** Script exits immediately with `ConfigMissingError`.
 
@@ -588,7 +669,7 @@ Shows all entries regardless of status, including those already marked as applie
 4. Run `node -e "require('dotenv').config(); console.log(process.env.DEEPSEEK_API_KEY)"` to check the key loads
 5. If still failing, copy `.env.example` to `.env` and re-enter the key
 
-### 9.2 Missing config file
+### 11.2 Missing config file
 
 **Symptom:** Script exits with code 1 listing missing config files.
 
@@ -599,7 +680,7 @@ Missing config file(s):
 
 **Fix:** Ensure all required config files exist in `config/`. See [Section 2.2](#22-config-files) for the full list. These files are human-authored — the pipeline creates none of them.
 
-### 9.3 DeepSeek API errors
+### 11.3 DeepSeek API errors
 
 **Symptom:** Individual jobs are skipped with `DeepSeekResponseError`.
 
@@ -612,7 +693,7 @@ Missing config file(s):
 
 **Note:** Errors on individual jobs only skip that job — the rest of the pipeline continues unaffected.
 
-### 9.4 Server won't start
+### 11.4 Server won't start
 
 **Symptom:** `node server/server.js` fails.
 
@@ -621,17 +702,18 @@ Missing config file(s):
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `EADDRINUSE :::3000` | Port already in use | Kill the existing process or set `PIPELINE_PORT=3001` in `.env` |
+| `EADDRINUSE :::3001` | Custom port in use | Use a different port in `PIPELINE_PORT` |
 | `MODULE_NOT_FOUND` express | Dependencies not installed | Run `npm install` |
 | `ConfigMissingError` | `.env` missing or incomplete | Create `.env` from `.env.example` |
 
-**Finding what's on port 3000:**
+**Finding what's on a port:**
 ```powershell
 netstat -ano | findstr :3000
 # Get the PID, then:
 taskkill /PID [number] /F
 ```
 
-### 9.5 Stack rank file not found by generate.js
+### 11.5 Stack rank file not found by generate.js
 
 **Symptom:**
 ```
@@ -642,7 +724,7 @@ No stack rank for YYYY-MM-DD. Run: node score.js --date=YYYY-MM-DD
 - Run `node score.js` first to generate the stack rank for today
 - Or use `--date` to point to an existing stack rank: `node generate.js --date=2026-05-28`
 
-### 9.6 Source file not found by generate.js
+### 11.6 Source file not found by generate.js
 
 **Symptom:**
 ```
@@ -653,19 +735,19 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 - Restore files from `archive/YYYY-MM-DD/` back to `jobs/` before running `generate.js`
 - Or run `generate.js` before `cleanup.js` in your workflow
 
-### 9.7 Dashboard not showing updates
+### 11.7 Dashboard not showing updates
 
 **Symptom:** Dashboard loads but no real-time updates appear.
 
 **Checks:**
 1. Verify the server is running on the same port as `PIPELINE_PORT` in `.env`
 2. Open browser DevTools → Network tab → filter by "events"
-3. Check for SSE connection errors
+3. Check for SSE connection errors to `http://localhost:{PORT}/events`
 4. Try refreshing the page
 
 **Fallback:** If the dashboard is unavailable, the pipeline still runs correctly — events simply aren't displayed. The `eventBroadcaster` module never throws, so a missing dashboard won't crash the pipeline.
 
-### 9.8 Bookmarklet not working
+### 11.8 Bookmarklet not working
 
 **Symptom:** Clicking the bookmarklet does nothing or shows an alert.
 
@@ -679,7 +761,7 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 
 **Alternative:** Use the **Manual AI Ingestion Platform** on the dashboard instead — it does not depend on LinkedIn DOM structure.
 
-### 9.9 Poor quality scores
+### 11.9 Poor quality scores
 
 **Symptom:** Quality scores consistently below 6.
 
@@ -689,7 +771,7 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 3. **Job descriptions too sparse** — Some LinkedIn listings have minimal text; the AI has less to work with
 4. **Cover letter paragraph 2 omitted** — If no specific angle exists, the AI correctly skips it, lowering the word count and potentially the score
 
-### 9.10 Manual AI Ingestion failures
+### 11.10 Manual AI Ingestion failures
 
 **Symptom:** The "Harvest via AI Engine" button returns an error.
 
@@ -706,7 +788,7 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 - Include the job title, company name, and all description sections
 - More text = better AI extraction. If text is truncated, the extraction quality drops.
 
-### 9.11 Applications.json corruption
+### 11.11 Applications.json corruption
 
 **Symptom:** `generate.js` errors related to `applications.json`.
 
@@ -715,7 +797,7 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 2. If corrupted, the last backup is the previous version (the file is overwritten, not appended)
 3. As a last resort, set `applications.json` to `[]` — the pipeline creates a fresh file on the next write
 
-### 9.12 Network/connectivity issues
+### 11.12 Network/connectivity issues
 
 **Symptom:** All DeepSeek calls fail with timeout or network errors.
 
@@ -725,11 +807,21 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 3. Check firewall/proxy settings
 4. Check DeepSeek service status
 
+### 11.13 Pipeline button in dashboard shows error
+
+**Symptom:** Clicking "Run Score" or "Run Generate" in the dashboard shows an error toast.
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Pipeline process already running` | A previous run hasn't finished | Wait for it to complete, or restart the server |
+| `Invalid task` | Unknown task name | Only `score`, `generate`, and `qa` are valid |
+| Process exits with code 1 | Script error | Check the live log panel for error details |
+
 ---
 
-## 10. File Reference
+## 12. File Reference
 
-### 10.1 Source modules
+### 12.1 Source modules
 
 | File | Purpose |
 |------|---------|
@@ -747,26 +839,26 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 | `src/lib/ranker.js` | Stack ranking logic (dense ranking, action flag assignment, straddle rule) |
 | `src/lib/promptBuilder.js` | Prompt assembly for all DeepSeek calls (scoring, resume, cover letter, quality) |
 
-### 10.2 Orchestrators
+### 12.2 Orchestrators
 
 | File | Purpose |
 |------|---------|
 | `score.js` | Scoring orchestrator — reads jobs, validates configs, scores via DeepSeek, ranks, writes stack rank, broadcasts events |
 | `generate.js` | Generation orchestrator — reads stack rank, parses qualifying jobs, generates docs, writes applications.json, broadcasts events |
 | `cleanup.js` | Archive orchestrator — moves job files from `jobs/` to `archive/YYYY-MM-DD/` |
-| `apply.js` | Application status tracker — updates applications.json via readline |
+| `src/qa.js` | QA evaluation — reads generated docs and evaluates quality via DeepSeek |
 
-### 10.3 Server
+### 12.3 Server
 
 | File | Purpose |
 |------|---------|
-| `server/server.js` | Express server factory (`createApp(jobsDir)`), SSE, state management, POST /harvest, POST /harvest-raw |
-| `server/dashboard.html` | Real-time dashboard (inline CSS/JS, no external deps) with Manual AI Ingestion Platform |
-| `server/bookmarklet.js` | Bookmarklet source (human-readable) |
+| `server/server.js` | Express server factory (`createApp(jobsDir)`), SSE, state management, POST /harvest, POST /harvest-raw, dashboard pipeline controls, application tracking API |
+| `server/dashboard.html` | Real-time dashboard (inline CSS/JS, no external deps) with Manual AI Ingestion Platform, pipeline controls, and application history |
+| `server/bookmarklet.js` | Bookmarklet source (human-readable, exported for unit testing with jsdom) |
 | `server/bookmarklet.min.js` | Minified bookmarklet (generated by `npm run build:bookmarklet`) |
 | `scripts/minify-bookmarklet.js` | Terser-based bookmarklet minifier |
 
-### 10.4 Configuration (human-authored)
+### 12.4 Configuration (human-authored)
 
 | File | Purpose |
 |------|---------|
@@ -774,11 +866,13 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 | `config/resume_prompt.md` | DeepSeek system prompt for resume generation |
 | `config/cover_letter_prompt.md` | DeepSeek system prompt for cover letter generation |
 | `config/quality_prompt.md` | DeepSeek system prompt for quality rating |
+| `config/qa_prompt.md` | DeepSeek system prompt for QA evaluation |
 | `config/adam_buteux_career.md` | Career profile (professional summary, achievements, education, certifications) |
 | `config/pillar_library.md` | Bullet-point library organized by skill pillar |
-| `config/resume_format_spec.md` | Resume format specification (reference only) |
+| `config/Writing_Style_Guide.md` | Writing style reference (informational) |
+| `config/authenticity-SKILL.md` | Authenticity skill definition (informational) |
 
-### 10.5 Data files
+### 12.5 Data files
 
 | File | Purpose | Created by |
 |------|---------|------------|

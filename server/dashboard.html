@@ -306,30 +306,107 @@
   .links-cell a.link-disabled { color: var(--text-muted); pointer-events: none; opacity: 0.4; }
 
   /* ===================================================================
-     Application History
+     Application History — Widescreen Horizontal Cards
      =================================================================== */
   #app-history-content {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .history-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
     background: var(--bg-tertiary);
     border-radius: 3px;
-    padding: 8px 10px;
-    font-size: 11px;
+    padding: 10px 14px;
+    font-size: 12px;
+    width: 100%;
+    max-width: 100%;
+    flex-wrap: wrap;
   }
 
-  .history-card .h-company { color: var(--accent-blue); font-weight: bold; }
-  .history-card .h-title   { color: var(--text-primary); }
-  .history-card .h-status  { display: inline-block; padding: 1px 6px; border-radius: 2px; font-size: 10px; margin-top: 4px; }
+  .history-card .h-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .history-card .h-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .history-card .h-company {
+    color: var(--accent-blue);
+    font-weight: bold;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .history-card .h-company:hover { text-decoration: underline; }
+  .history-card .h-title {
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+  }
+  .history-card .h-title-divider { color: var(--text-muted); flex-shrink: 0; }
+
+  .history-card .h-score {
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .history-card .h-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: bold;
+    white-space: nowrap;
+  }
   .history-card .h-status.status-generated    { background: #2e7d32; color: #fff; }
   .history-card .h-status.status-applied      { background: #1565c0; color: #fff; }
   .history-card .h-status.status-interviewing { background: #6a1b9a; color: #fff; }
   .history-card .h-status.status-rejected     { background: #b71c1c; color: #fff; }
   .history-card .h-status.status-offer        { background: #1b5e20; color: #fff; }
   .history-card .h-status.status-withdrawn    { background: #4e342e; color: #fff; }
+
+  /* Folder link and apply button in history cards */
+  .h-folder-link {
+    color: var(--accent-amber);
+    text-decoration: none;
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .h-folder-link:hover { text-decoration: underline; }
+
+  .h-apply-btn {
+    background: transparent;
+    border: 1px solid #1565c0;
+    color: #1565c0;
+    padding: 3px 10px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+  .h-apply-btn:hover {
+    background: #1565c0;
+    color: #fff;
+  }
 
   .history-summary {
     display: flex;
@@ -345,6 +422,62 @@
     font-size: 12px;
     padding: 20px;
     text-align: center;
+  }
+
+  /* Application History Filter Toggle */
+  .app-history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .app-history-header h3 {
+    margin-bottom: 0;
+    flex-shrink: 0;
+  }
+
+  .app-history-filters {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .app-history-filters .filter-btn {
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    border: none;
+    padding: 6px 14px;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+    position: relative;
+  }
+
+  .app-history-filters .filter-btn:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 20%;
+    height: 60%;
+    width: 1px;
+    background: var(--border-color);
+  }
+
+  .app-history-filters .filter-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+
+  .app-history-filters .filter-btn.active {
+    background: var(--accent-blue);
+    color: #000;
+    font-weight: bold;
   }
 
   /* ===================================================================
@@ -511,6 +644,14 @@
   }
   .pipeline-btn.run-qa:hover:not(:disabled) {
     background: #ffb74d;
+  }
+
+  .pipeline-btn.cleanup-btn {
+    background: #4a5568;
+    color: #fff;
+  }
+  .pipeline-btn.cleanup-btn:hover:not(:disabled) {
+    background: #2d3748;
   }
 
   .pipeline-btn .spinner {
@@ -751,7 +892,13 @@
 
     <!-- Application History Panel -->
     <section id="app-history" class="panel">
-      <h3>Application History</h3>
+      <div class="app-history-header">
+        <h3>Application History</h3>
+        <div class="app-history-filters">
+          <button type="button" class="filter-btn active" data-filter="active">Active Run Only</button>
+          <button type="button" class="filter-btn" data-filter="all">View Full Ledger</button>
+        </div>
+      </div>
       <div id="app-history-content"></div>
     </section>
 
@@ -785,6 +932,10 @@
         <button id="pipeline-btn-qa" type="button" class="pipeline-btn run-qa">
           <span class="spinner"></span>
           &#9654; Run Forensic Auditor
+        </button>
+        <button id="pipeline-btn-cleanup" type="button" class="pipeline-btn cleanup-btn">
+          <span class="spinner"></span>
+          &#9654; Run Cleanup Archiver
         </button>
       </div>
 
@@ -1079,7 +1230,12 @@ function updateQualityCell(data) {
 
 /**
  * Render the application history panel from state data.
- * @param {Array} history - Array of ApplicationRecord objects (last 10).
+ * Each card is laid out as a horizontal flex row with left-side metadata
+ * and right-side status/actions, maximizing horizontal screen utilization.
+ * Filters the displayed records based on the active appHistoryFilter:
+ * - 'active': only records where dateGenerated matches currentRunDate
+ * - 'all':    renders the entire array
+ * @param {Array} history - Array of ApplicationRecord objects.
  */
 function renderAppHistory(history) {
   if (!history || history.length === 0) {
@@ -1087,10 +1243,38 @@ function renderAppHistory(history) {
     return;
   }
 
-  // Summary counts by status
+  // Apply active filter — filter strictly by currentRunDate.
+  // When currentRunDate is null (after cleanup or cold boot),
+  // the active list must evaluate to an empty array [], NOT fall
+  // through to display the full ledger.
+  var displayHistory;
+  if (appHistoryFilter === 'active') {
+    displayHistory = [];
+    if (currentRunDate) {
+      for (var fi = 0; fi < history.length; fi++) {
+        if (history[fi].dateGenerated === currentRunDate) {
+          displayHistory.push(history[fi]);
+        }
+      }
+    }
+  } else {
+    displayHistory = history;
+  }
+
+  // If filtering resulted in an empty list, show contextual empty state
+  if (displayHistory.length === 0) {
+    var emptyMsg = 'No application documents found for the active run.';
+    if (appHistoryFilter === 'all') {
+      emptyMsg = 'No applications yet. Run <code>generate.js</code> to create application packages.';
+    }
+    appHistoryContent.innerHTML = '<div class="empty-state">' + emptyMsg + '</div>';
+    return;
+  }
+
+  // Summary counts by status (based on filtered list)
   var statusCounts = {};
-  for (var i = 0; i < history.length; i++) {
-    var s = history[i].status || 'unknown';
+  for (var i = 0; i < displayHistory.length; i++) {
+    var s = displayHistory[i].status || 'unknown';
     statusCounts[s] = (statusCounts[s] || 0) + 1;
   }
   var summaryHtml = '<div class="history-summary">';
@@ -1104,17 +1288,167 @@ function renderAppHistory(history) {
   summaryHtml += '</div>';
 
   var cardsHtml = '';
-  for (var k = 0; k < history.length; k++) {
-    var rec = history[k];
+  for (var k = 0; k < displayHistory.length; k++) {
+    var rec = displayHistory[k];
+    var id = escapeHtml(rec.id || '');
+    var company = escapeHtml(rec.company || '');
+    var title = escapeHtml(rec.title || '');
+    var url = rec.url ? escapeHtml(rec.url) : null;
+    var score = rec.score ?? '?';
+    var dateGenerated = rec.dateGenerated || '?';
+    var status = rec.status || 'generated';
+
+    // Left section: company + title (with URL link) and score line
+    // All rendered side-by-side in a single horizontal row via flex-row .h-left
+    var headerHtml;
+    if (url) {
+      headerHtml = '<a href="' + url + '" target="_blank" class="h-company" title="Open LinkedIn job posting">' + company + '</a><span class="h-title-divider">&mdash;</span><span class="h-title">' + title + '</span>';
+    } else {
+      headerHtml = '<span class="h-company">' + company + '</span><span class="h-title-divider">&mdash;</span><span class="h-title">' + title + '</span>';
+    }
+
+    // Score line with generated/applied date
+    var dateAppliedHtml = '';
+    if (rec.dateApplied) {
+      dateAppliedHtml = ' &middot; Applied: ' + escapeHtml(rec.dateApplied);
+    }
+    var scoreHtml = 'Score: <strong>' + score + '</strong>/10 &middot; Generated: ' + dateGenerated + dateAppliedHtml;
+
+    // Right section: status badge, folder link, apply button
+    var rightParts = '<span class="h-status status-' + status + '">' + status + '</span>';
+
+    if (rec.outputPath) {
+      rightParts += '<a href="#" class="h-folder-link" data-id="' + id + '" title="Open output folder in Explorer">\uD83D\uDCC1 Folder</a>';
+    }
+
+    if (status === 'generated') {
+      rightParts += '<button class="h-apply-btn" data-id="' + id + '" type="button">\u2714 Mark Applied</button>';
+    }
+
     cardsHtml +=
-      '<div class="history-card">' +
-      '  <div><span class="h-company">' + escapeHtml(rec.company || '') + '</span> &mdash; <span class="h-title">' + escapeHtml(rec.title || '') + '</span></div>' +
-      '  <div style="margin-top:2px;">Score: <strong>' + (rec.score ?? '?') + '</strong>/10 &middot; Generated: ' + (rec.dateGenerated || '?') + '</div>' +
-      '  <div><span class="h-status status-' + (rec.status || 'generated') + '">' + (rec.status || 'generated') + '</span></div>' +
+      '<div class="history-card" data-id="' + id + '">' +
+        '<div class="h-left">' +
+          '<div>' + headerHtml + '</div>' +
+          '<div class="h-score">' + scoreHtml + '</div>' +
+        '</div>' +
+        '<div class="h-right">' + rightParts + '</div>' +
       '</div>';
   }
 
-  appHistoryContent.innerHTML = summaryHtml + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;">' + cardsHtml + '</div>';
+  appHistoryContent.innerHTML = summaryHtml + cardsHtml;
+}
+
+/* ------------------------------------------------------------------ */
+/* Application History Filter Toggle                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Set the active application history filter and re-render.
+ * @param {'active'|'all'} filter - The filter mode to activate.
+ */
+function setAppHistoryFilter(filter) {
+  if (filter !== 'active' && filter !== 'all') return;
+  appHistoryFilter = filter;
+
+  // Update button active state
+  var buttons = document.querySelectorAll('.app-history-filters .filter-btn');
+  for (var i = 0; i < buttons.length; i++) {
+    var btn = buttons[i];
+    if (btn.getAttribute('data-filter') === filter) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  }
+
+  // Re-fetch current state and re-render application history
+  try {
+    fetch('/state')
+      .then(function(res) {
+        if (!res.ok) throw new Error('Server returned ' + res.status);
+        return res.json();
+      })
+      .then(function(state) {
+        renderAppHistory(state.applicationHistory || []);
+      })
+      .catch(function() {
+        // Silently fail — state may not be available
+        addDebugLog('setAppHistoryFilter: failed to fetch state', 'error');
+      });
+  } catch (err) {
+    addDebugLog('setAppHistoryFilter: ' + err.message, 'error');
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Context Navigation & Status Actions                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Open the output folder for an application in Windows Explorer.
+ * @param {string} id - Application record ID.
+ */
+function openFolder(id) {
+  fetch('/api/applications/open-folder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: id }),
+  })
+  .then(function(res) {
+    if (res.ok) {
+      showToast('Output folder opened in Explorer', 'success');
+    } else {
+      showToast('Failed to open folder', 'error');
+    }
+  })
+  .catch(function() {
+    showToast('Network error \u2014 is the server running?', 'error');
+  });
+}
+
+/**
+ * Mark an application as "applied" via the backend and update the card UI.
+ * Transitions the status badge, removes the action button, and appends
+ * the applied date inline.
+ * @param {string} id - Application record ID.
+ * @param {HTMLElement} btn - The clicked button element.
+ */
+function markAsApplied(id, btn) {
+  fetch('/api/applications/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: id }),
+  })
+  .then(function(res) {
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    return res.json();
+  })
+  .then(function(record) {
+    // Find the parent card
+    var card = btn.closest('.history-card');
+    if (!card) return;
+
+    // Update status badge
+    var statusBadge = card.querySelector('.h-status');
+    if (statusBadge) {
+      statusBadge.className = 'h-status status-applied';
+      statusBadge.textContent = 'applied';
+    }
+
+    // Append applied date to the score line
+    var scoreDiv = card.querySelector('.h-score');
+    if (scoreDiv && record.dateApplied) {
+      scoreDiv.innerHTML += ' &middot; Applied: ' + escapeHtml(record.dateApplied);
+    }
+
+    // Remove the apply button
+    btn.remove();
+
+    showToast('Marked as applied: ' + escapeHtml(record.company || record.id), 'success');
+  })
+  .catch(function(err) {
+    showToast('Failed to mark as applied: ' + err.message, 'error');
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -1273,6 +1607,21 @@ function cssSelectorEscape(str) {
 var currentCounts = { harvested: 0, scored: 0, generated: 0 };
 
 /**
+ * Application History filter state.
+ * 'active' — only show records matching the current run date.
+ * 'all' — show the full application ledger.
+ * @type {string}
+ */
+var appHistoryFilter = 'active';
+
+/**
+ * The date of the current pipeline run, set from state.date.
+ * Used by renderAppHistory() to filter records.
+ * @type {string|null}
+ */
+var currentRunDate = null;
+
+/**
  * Handle an incoming SSE event.
  * @param {object} event - Parsed event from EventSource.
  */
@@ -1358,6 +1707,9 @@ function populateFromState(state) {
 
   // Header
   updateHeader(state.phase || 'idle', state.date || null);
+
+  // Store current run date for application history filtering
+  currentRunDate = state.date || null;
 
   // Counts
   var hCount = (state.harvested && state.harvested.length) || 0;
@@ -1452,6 +1804,68 @@ function init() {
     wirePipelineControls();
   } catch (err) {
     addDebugLog('init() Step 4 (pipeline controls) failed: ' + err.message, 'error');
+  }
+
+  // Step 5: Wire the application history card actions (folder open, mark applied)
+  try {
+    wireAppHistoryActions();
+  } catch (err) {
+    addDebugLog('init() Step 5 (app history actions) failed: ' + err.message, 'error');
+  }
+
+  // Step 6: Wire the application history filter toggle buttons
+  try {
+    wireAppHistoryFilters();
+  } catch (err) {
+    addDebugLog('init() Step 6 (app history filters) failed: ' + err.message, 'error');
+  }
+}
+
+/**
+ * Wire event delegation for application history card actions.
+ * Folder link clicks and "Mark as Applied" button clicks are handled
+ * via a single delegated listener on the history container.
+ */
+function wireAppHistoryActions() {
+  var container = document.getElementById('app-history-content');
+  if (!container) return;
+
+  container.addEventListener('click', function(e) {
+    var target = e.target;
+
+    // Folder shortcut link
+    if (target.classList.contains('h-folder-link')) {
+      e.preventDefault();
+      var id = target.getAttribute('data-id');
+      if (id) openFolder(id);
+      return;
+    }
+
+    // Mark as Applied button
+    if (target.classList.contains('h-apply-btn')) {
+      var id = target.getAttribute('data-id');
+      if (id) markAsApplied(id, target);
+      return;
+    }
+  });
+}
+
+/**
+ * Wire the application history filter toggle buttons.
+ * Clicking a filter button updates the active filter and re-renders
+ * the history panel with the corresponding view.
+ */
+function wireAppHistoryFilters() {
+  var buttons = document.querySelectorAll('.app-history-filters .filter-btn');
+  if (!buttons || buttons.length === 0) return;
+
+  for (var i = 0; i < buttons.length; i++) {
+    (function(btn) {
+      btn.addEventListener('click', function() {
+        var filter = btn.getAttribute('data-filter');
+        if (filter) setAppHistoryFilter(filter);
+      });
+    })(buttons[i]);
   }
 }
 
@@ -1602,6 +2016,7 @@ var PIPELINE_TASKS = {
   score:    { btnId: 'pipeline-btn-score',    label: 'Score Engine' },
   generate: { btnId: 'pipeline-btn-generate', label: 'Generation Engine' },
   qa:       { btnId: 'pipeline-btn-qa',       label: 'Forensic Auditor' },
+  cleanup:  { btnId: 'pipeline-btn-cleanup',  label: 'Cleanup Archiver' },
 };
 
 /** @type {EventSource|null} */
@@ -1847,6 +2262,14 @@ function wirePipelineControls() {
   if (qaBtn) {
     qaBtn.addEventListener('click', function() {
       startPipelineTask('qa');
+    });
+  }
+
+  // Cleanup Archiver button
+  var cleanupBtn = document.getElementById('pipeline-btn-cleanup');
+  if (cleanupBtn) {
+    cleanupBtn.addEventListener('click', function() {
+      startPipelineTask('cleanup');
     });
   }
 
