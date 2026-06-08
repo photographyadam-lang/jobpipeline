@@ -18,37 +18,28 @@ const { http, HttpResponse } = require('msw');
  *   NODE_OPTIONS='--require ./tests/helpers/msw-generate-setup.js'
  */
 
-const RESUME_RESPONSE_CONTENT = `# Adam Buteux, MBA, CISSP, CIPM
-Portland, Oregon (open to relocation) | adam@adambuteux.com | 929-218-3981 | linkedin.com/in/adambuteux
+const RESUME_RESPONSE_CONTENT = `## PROFESSIONAL EXPERIENCE
 
-## Summary
-Senior governance and privacy professional with 15+ years driving compliance programs at scale.
-
-## Professional Experience
-
-### Meta | Senior Manager, Privacy & Risk Review | June 2022–November 2025
+### Meta
+#### Senior Manager, Privacy & Risk Review — June 2022–November 2025
 *Led enterprise AI risk review across Facebook, Instagram, and Messenger.*
 - **Reduced regulatory response time by 40%.** Redesigned the DMA compliance workflow across 10 product teams, cutting average cycle from 21 to 12 days.
 
-### Audible (Amazon) | Director, Privacy Operations | January 2019–May 2022
+### Audible (Amazon)
+#### Director, Privacy Operations — January 2019–May 2022
 *Oversaw global privacy program for 35M+ subscriber platform.*
 - **Achieved GDPR certification ahead of deadline.** Delivered data mapping and consent infrastructure 3 months early across 6 workstreams.
 
-### PwC Advisory | Director, Risk, Cybersecurity, and Privacy | March 2015–December 2018
+### PwC Advisory
+#### Director, Risk, Cybersecurity, and Privacy — March 2015–December 2018
 *Privacy and GRC engagements for Fortune 500 clients.*
 - **Built privacy program from scratch for a $4B healthcare client.** HIPAA-compliant governance framework adopted across 12 business units.
 
-## Independent Projects
+## INDEPENDENT PROJECTS
 
-### RiskHelper.ai | Co-Founder & Head of Product | December 2025–Present
-AI governance SaaS; product strategy, compliance framework, go-to-market.
-
-## Education
-**Executive MBA** — Bayes Business School, London
-**BSc Computer Science with Management** — King's College London
-
-## Certifications
-CISSP | CIPM`;
+### RiskHelper.ai
+#### Co-Founder & Head of Product — December 2025–Present
+AI governance SaaS; product strategy, compliance framework, go-to-market.`;
 
 const COVER_LETTER_RESPONSE_CONTENT = `# Cover Letter — Meridian Health Systems | Senior Privacy Manager
 

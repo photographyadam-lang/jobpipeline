@@ -79,10 +79,11 @@ async function copyFixture(tmpDir, fixtureName) {
  *
  * @param {string} tmpDir - The temp directory (PIPELINE_BASE_DIR).
  * @param {object} [extraEnv] - Additional environment variables.
+ * @param {string} [dateFlag] - Optional --date flag string (e.g. '--date=2026-06-02').
  * @returns {{ stdout: string }} Combined stdout+stderr output.
  */
-function runScore(tmpDir, extraEnv = {}) {
-  const result = execSync(`node "${SCORE_SCRIPT}" 2>&1`, {
+function runScore(tmpDir, extraEnv = {}, dateFlag = '') {
+  const result = execSync(`node "${SCORE_SCRIPT}" ${dateFlag} 2>&1`, {
     cwd: tmpDir,
     env: {
       ...process.env,
@@ -141,7 +142,7 @@ describe('score.js', () => {
     await copyFixture(tmpDir, 'sample_job_1.md');
     await copyFixture(tmpDir, 'sample_job_2.md');
 
-    const { stdout } = runScore(tmpDir);
+    const { stdout } = runScore(tmpDir, {}, '--date=2026-06-02');
 
     // Verify the completion banner
     expect(stdout).toMatch(/Done\. 2 jobs scored/);
@@ -161,7 +162,7 @@ describe('score.js', () => {
     await copyFixture(tmpDir, 'sample_job_1.md');
     await copyFixture(tmpDir, 'sample_job_2.md');
 
-    const { stdout } = runScore(tmpDir);
+    const { stdout } = runScore(tmpDir, {}, '--date=2026-06-02');
 
     const stackRankPath = path.join(tmpDir, 'resumes', '2026-06-02', 'stack_rank_2026-06-02.md');
     const content = await fs.readFile(stackRankPath, 'utf-8');

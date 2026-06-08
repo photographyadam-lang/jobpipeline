@@ -44,10 +44,37 @@ function parseScoreResponse(rawResponse) {
     throw new DeepSeekResponseError('Gap is missing or empty');
   }
 
+  // 7. must_haves — warn + default on failure, never throw
+  let mustHaves = '—';
+  if (typeof parsed.must_haves === 'string' && parsed.must_haves.trim() !== '') {
+    mustHaves = parsed.must_haves;
+  } else {
+    process.emitWarning('must_haves is missing or empty — defaulting to em-dash');
+  }
+
+  // 8. target_archetype — warn + default on failure, never throw
+  let targetArchetype = '—';
+  if (typeof parsed.target_archetype === 'string' && parsed.target_archetype.trim() !== '') {
+    targetArchetype = parsed.target_archetype;
+  } else {
+    process.emitWarning('target_archetype is missing or empty — defaulting to em-dash');
+  }
+
+  // 9. matched_pillars — warn + default on failure, never throw
+  let matchedPillars = [];
+  if (Array.isArray(parsed.matched_pillars)) {
+    matchedPillars = parsed.matched_pillars;
+  } else {
+    process.emitWarning('matched_pillars is missing or not an array — defaulting to empty array');
+  }
+
   return {
     score: parsed.score,
     fitSignal: parsed.fit_signal,
     gap: parsed.gap,
+    mustHaves: mustHaves,
+    targetArchetype: targetArchetype,
+    matchedPillars: matchedPillars,
   };
 }
 
@@ -55,15 +82,13 @@ function parseScoreResponse(rawResponse) {
  * Combine a valid JobFile object with parsed scoring attributes into a ScoredJob.
  *
  * @param {object} job - A valid JobFile object.
- * @param {{ score: number, fitSignal: string, gap: string }} scoreResult - Parsed score fields.
+ * @param {{ score: number, fitSignal: string, gap: string, mustHaves: string, targetArchetype: string, matchedPillars: string[] }} scoreResult - Parsed score fields.
  * @returns {object} ScoredJob with rank and actionFlag set to null.
  */
 function createScoredJob(job, scoreResult) {
   return {
     ...job,
-    score: scoreResult.score,
-    fitSignal: scoreResult.fitSignal,
-    gap: scoreResult.gap,
+    ...scoreResult,
     rank: null,
     actionFlag: null,
   };

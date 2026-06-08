@@ -1,7 +1,7 @@
 # Job Pipeline — Architecture Guide
 
 > **Audience:** AI coding agents tasked with maintaining, extending, or debugging this project.
-> **Last updated:** 2026-06-03
+> **Last updated:** 2026-06-08
 
 ---
 
@@ -17,11 +17,12 @@
 8. [SSE Event System](#8-sse-event-system)
 9. [Deduplication Algorithm](#9-deduplication-algorithm)
 10. [Ranking Algorithm](#10-ranking-algorithm)
-11. [Prompt Assembly](#11-prompt-assembly)
-12. [Quality Assessment](#12-quality-assessment)
-13. [Testing Strategy](#13-testing-strategy)
-14. [Coding Conventions & Constraints](#14-coding-conventions--constraints)
-15. [Dependency Graph](#15-dependency-graph)
+11. [LLM Integration](#11-llm-integration)
+12. [Prompt Assembly](#12-prompt-assembly)
+13. [Quality Assessment](#13-quality-assessment)
+14. [Testing Strategy](#14-testing-strategy)
+15. [Coding Conventions & Constraints](#15-coding-conventions--constraints)
+16. [Dependency Graph](#16-dependency-graph)
 
 ---
 
@@ -462,7 +463,7 @@ The server maintains an **in-memory URL cache** to prevent duplicate harvests (r
 8. Broadcast scoring_started              ← SSE event
 9. FOR each unique job (sequential):      ← NO Promise.all
    a. Build scoring prompt                ← buildScoringPrompt()
-   b. callDeepSeek()                      ← DeepSeek API (maxTokens: 300)
+   b. callDeepSeek()                      ← DeepSeek API (maxTokens: 1024)
    c. Parse response                      ← parseScoreResponse()
    d. Create ScoredJob                    ← createScoredJob()
    e. Broadcast job_scored                ← SSE with rank: null
@@ -477,7 +478,7 @@ The server maintains an **in-memory URL cache** to prevent duplicate harvests (r
 
 **Key details:**
 - `buildScoringPrompt()` returns a single userPrompt string (the system prompt is already loaded separately)
-- `callDeepSeek()` is called with `{ maxTokens: 300 }` for scoring
+- `callDeepSeek()` is called with `{ maxTokens: 1024 }` for scoring
 - Stats distribution uses 4 buckets: `1-3`, `4-5`, `6-7`, `8-10`
 - The stack rank filename follows the pattern: `stack_rank_YYYY-MM-DD.md`
 
@@ -753,9 +754,209 @@ In the stack rank markdown, action flags are displayed with emoji prefixes:
 
 ---
 
-## 11. Prompt Assembly
+## 11. LLM Integration
 
-### 11.1 Pattern
+The pipeline uses the DeepSeek API (`deepseek-chat` model) for four distinct LLM call types. Each call type has a dedicated system prompt stored in `config/`, a pure-function prompt assembler in [`src/lib/promptBuilder.js`](src/lib/promptBuilder.js), and a response parser in the relevant model module. All calls are routed through a single API adapter in [`src/lib/deepseek.js`](src/lib/deepseek.js).
+
+### 11.1 Architecture Overview
+
+```
+LLM Call Architecture
+
+Orchestrator
+(score.js / generate.js)
+  |
+  +-- 1. Load system prompt from config/ (fileStore.readConfig)
+  +-- 2. Load career/pillar data from config/
+  +-- 3. Call promptBuilder pure function
+  |       +--> Returns userPrompt string
+  +-- 4. Call callDeepSeek(systemPrompt, userPrompt, options)
+  |       +--> src/lib/deepseek.js
+  |              +-- POST https://api.deepseek.com/v1/chat/completions
+  |              +-- Bearer token from DEEPSEEK_API_KEY
+  |              +--> Returns raw response text
+  +-- 5. Parse response (model-specific)
+          +-- JSON responses --> parseScoreResponse / inline JSON parse
+          +-- Plain text --> raw markdown (resume/cover letter)
+```
+
+### 11.2 API Adapter — `src/lib/deepseek.js`
+
+```javascript
+async function callDeepSeek(systemPrompt, userPrompt, options)
+```
+
+**Request details:**
+
+| Property | Value |
+|----------|-------|
+| Endpoint | `https://api.deepseek.com/v1/chat/completions` |
+| Model | `deepseek-chat` |
+| Auth | Bearer token from `process.env.DEEPSEEK_API_KEY` |
+| Method | POST (native Node.js `fetch`) |
+| Body | `{ model, messages: [system, user], max_tokens }` |
+| Signal | `AbortSignal.timeout(timeoutMs)` |
+
+**Default options:**
+- `timeoutMs`: 30000 (30 seconds)
+- `maxTokens`: 1024
+
+**Error handling:**
+
+| Condition | Error thrown |
+|-----------|-------------|
+| `DEEPSEEK_API_KEY` not set | `ConfigMissingError` — never exposes the key in the message |
+| HTTP 401 | `DeepSeekResponseError('Unauthorized - check your DeepSeek API key', 401)` |
+| HTTP 429 | `DeepSeekResponseError('Rate limit exceeded - try again later', 429)` |
+| Other non-200 | `DeepSeekResponseError('DeepSeek API returned status {n}', statusCode)` |
+| Timeout / AbortError | `DeepSeekResponseError('Request timed out', null)` |
+| Network error | `DeepSeekResponseError('Network error: {message}', null)` |
+
+**Response parsing:** The adapter extracts `data.choices[0].message.content` from the DeepSeek JSON response and returns it as a raw string. Callers are responsible for further parsing (JSON decode for structured responses, raw text for document generation).
+
+### 11.3 Prompt Assembly Pattern
+
+All prompt builders in [`src/lib/promptBuilder.js`](src/lib/promptBuilder.js) are **pure functions**:
+
+- They never perform I/O (filesystem or network)
+- They never log to console
+- They validate all inputs and throw descriptive `Error`s on missing/invalid fields
+- They return labeled section content (e.g., `## CANDIDATE PROFILE`, `## JOB DESCRIPTION`)
+
+The **system prompt** is loaded separately by the orchestrator from a `config/*.md` file via `fileStore.readConfig()` and passed through unchanged to `callDeepSeek()`. The prompt builders only assemble the **user prompt** — the context data (career profile, job description, etc.).
+
+### 11.4 Call Types
+
+#### 11.4.1 Scoring Call
+
+| Property | Value |
+|----------|-------|
+| Purpose | Score a job against the candidate profile |
+| Used in | `score.js` (per-job loop) |
+| System prompt | `config/scoring_prompt.md` |
+| User prompt builder | `buildScoringPrompt(careerContents, jobFile)` |
+| User prompt labels | `CANDIDATE PROFILE`, `JOB DESCRIPTION` |
+| `maxTokens` | 1024 |
+| `timeoutMs` | 30000 (default) |
+| Response format | JSON: `{ "score": number, "fitSignal": string, "gap": string }` |
+| Response parser | `parseScoreResponse(rawResponse)` in `src/models/scoredJob.js` |
+
+**Parsing and validation:**
+- Must be valid JSON
+- `score` must be an integer 1-10
+- `fitSignal` must be a non-empty string (validated as `STRONG_FIT` / `MODERATE_FIT` / `WEAK_FIT` / `POOR_FIT`)
+- `gap` must be a non-empty string
+- On failure: throws `DeepSeekResponseError` — the orchestrator skips the job and broadcasts `job_skipped`
+
+**Note:** `buildScoringPrompt` is unique among the builders — it returns only a user prompt string (not a tuple), because the scoring system prompt is passed separately as the first argument to `callDeepSeek()`.
+
+#### 11.4.2 Resume Generation Call
+
+| Property | Value |
+|----------|-------|
+| Purpose | Generate a tailored resume markdown document |
+| Used in | `generate.js` (per-job loop, Call 1 of 3) |
+| System prompt | `config/resume_prompt.md` |
+| User prompt builder | `buildResumePrompt(careerContents, pillarContents, scoredJob, outputInstruction)` |
+| User prompt labels | `CAREER HISTORY`, `PILLAR LIBRARY`, `JOB DESCRIPTION`, `FIT SIGNAL`, `GAP` |
+| `maxTokens` | 2000 |
+| `timeoutMs` | 60000 (60s) |
+| Response format | Raw markdown (plain text) |
+| Response handling | Written directly as `resume.md` |
+
+The optional `outputInstruction` parameter appends additional formatting instructions (e.g., pillar library mode instructions) passed by the orchestrator.
+
+#### 11.4.3 Cover Letter Call
+
+| Property | Value |
+|----------|-------|
+| Purpose | Generate a tailored cover letter |
+| Used in | `generate.js` (per-job loop, Call 2 of 3) |
+| System prompt | `config/cover_letter_prompt.md` |
+| User prompt builder | `buildCoverLetterPrompt(careerContents, scoredJob, resumeContent)` |
+| User prompt labels | `CAREER HISTORY`, `JOB DESCRIPTION`, `GENERATED RESUME` |
+| `maxTokens` | 800 |
+| `timeoutMs` | 60000 (60s) |
+| Response format | Raw markdown (plain text) |
+| Response handling | Written directly as `cover_letter.md` (or empty string on failure) |
+
+**Failure tolerance:** If this call fails (timeout, API error), `coverLetterContent` is set to `null` (writes empty string to disk). The pipeline continues to the quality assessment step — generation is **not blocked** by a failed cover letter.
+
+#### 11.4.4 Quality Assessment Call
+
+| Property | Value |
+|----------|-------|
+| Purpose | Rate the quality of the generated resume and cover letter |
+| Used in | `generate.js` (per-job loop, Call 3 of 3) |
+| System prompt | `config/quality_prompt.md` |
+| User prompt builder | `buildQualityPrompt(scoredJob, resumeContent, coverLetterContent)` |
+| User prompt labels | `JOB DESCRIPTION`, `GENERATED RESUME`, `GENERATED COVER LETTER` |
+| `maxTokens` | 200 |
+| `timeoutMs` | 30000 (30s) |
+| Response format | JSON: `{ resumeQuality, coverLetterQuality, qualityNote, pillarsSelected, coverLetterParas }` |
+| Response handling | Parsed inline in `generate.js`; fields set to `null` on failure |
+
+**Failure tolerance:** If this call fails or returns unparseable JSON, all quality fields (`resumeQuality`, `coverLetterQuality`, `qualityNote`, `pillarsSelected`, `coverLetterParas`) are set to `null`. Resume and cover letter are still written — generation is **not blocked** by a failed quality assessment.
+
+### 11.5 Rate Limiting Strategy
+
+All DeepSeek calls are **sequential** — never `Promise.all`. Both orchestrators use simple `for` loops:
+
+```javascript
+// score.js pattern
+for (const job of uniqueJobs) {
+  const userPrompt = buildScoringPrompt(careerContents, job);
+  const raw = await callDeepSeek(systemPrompt, userPrompt, { maxTokens: 1024 });
+  // parse, handle errors, broadcast ...
+}
+
+// generate.js pattern
+for (const entry of qualifyingJobs) {
+  const resume = await callDeepSeek(resumeSysPrompt, resumeUserPrompt,
+    { maxTokens: 2000, timeoutMs: 60000 });
+  const coverLetter = await callDeepSeek(clSysPrompt, clUserPrompt,
+    { maxTokens: 800, timeoutMs: 60000 });
+  const quality = await callDeepSeek(qualitySysPrompt, qualityUserPrompt,
+    { maxTokens: 200, timeoutMs: 30000 });
+  // handle failures per call type, write files, broadcast ...
+}
+```
+
+| Characteristic | Value |
+|----------------|-------|
+| Scoring throughput | ~3-5 seconds per job |
+| Generation throughput | ~10-20 seconds per job (3 sequential calls) |
+| Concurrency | Single-user pipeline, no concurrent job processing |
+| 429 handling | HTTP 429 is caught by `callDeepSeek`; affected job is skipped, pipeline continues |
+| Rationale | DeepSeek enforces per-second rate limits; parallel calls would trigger 429s on large batches |
+
+### 11.6 Four-Layer Error Tolerance
+
+The pipeline uses a graduated error-tolerance strategy for LLM calls:
+
+| Layer | Failure scope | Behavior |
+|-------|--------------|----------|
+| **1. API adapter** | Network error, timeout, non-200 | Throws `DeepSeekResponseError` with descriptive message (never exposes API key) |
+| **2. Response parsing (scoring)** | Invalid JSON, missing fields | Throws `DeepSeekResponseError` — orchestrator logs warning, broadcasts `job_skipped`, continues to next job |
+| **3. Response parsing (generation)** | Cover letter call fails | Sets `coverLetterContent = null` (writes empty string), continues to quality assessment |
+| **4. Response parsing (quality)** | Invalid JSON, missing fields, or call failure | Sets all quality fields to `null`, continues to file writing |
+
+**Key principle:** A single failed LLM call **never** fails the entire pipeline. Individual jobs may be skipped or have degraded output, but the pipeline always completes.
+
+### 11.7 Summary of Call Parameters
+
+| Call | `maxTokens` | `timeoutMs` | Response type | Failure behavior |
+|------|-------------|-------------|---------------|-----------------|
+| Scoring | 1024 | 30000 | JSON (parsed) | Skip job, broadcast `job_skipped` |
+| Resume | 2000 | 60000 | Raw markdown | Skip job, broadcast `doc_skipped` |
+| Cover letter | 800 | 60000 | Raw markdown | Set to empty string, continue |
+| Quality | 200 | 30000 | JSON (parsed) | Set quality fields to null, continue |
+
+---
+
+## 12. Prompt Assembly
+
+### 12.1 Pattern
 
 All prompt builders follow the same pattern:
 
@@ -764,7 +965,7 @@ All prompt builders follow the same pattern:
 3. Assemble user prompt with labeled sections (e.g. `## CANDIDATE PROFILE`, `## JOB DESCRIPTION`)
 4. Return `[systemPromptString, userPromptString]` or just the user prompt string for scoring
 
-### 11.2 Config File Roles
+### 12.2 Config File Roles
 
 | Config file | Used by | Content |
 |-------------|---------|---------|
@@ -777,7 +978,7 @@ All prompt builders follow the same pattern:
 | `pillar_library.md` | `buildResumePrompt()` | Writing style pillars |
 | `Writing_Style_Guide.md` | Reference | Writing style reference |
 
-### 11.3 DeepSeek Response Formats
+### 12.3 DeepSeek Response Formats
 
 **Score response** (parsed by `parseScoreResponse`):
 ```json
@@ -803,7 +1004,7 @@ All prompt builders follow the same pattern:
 
 ---
 
-## 12. Quality Assessment
+## 13. Quality Assessment
 
 Quality assessment is performed as the third DeepSeek call during document generation (`generate.js`). Each generated document pair receives:
 
@@ -823,9 +1024,9 @@ Quality assessment is performed as the third DeepSeek call during document gener
 
 ---
 
-## 13. Testing Strategy
+## 14. Testing Strategy
 
-### 13.1 Test Layers
+### 14.1 Test Layers
 
 | Layer | Tool | What it tests | Location |
 |-------|------|---------------|----------|
@@ -833,14 +1034,14 @@ Quality assessment is performed as the third DeepSeek call during document gener
 | **Integration** | Jest + msw | Adapters (`fileStore.js`, `deepseek.js`, `server.js`) with real I/O or mocked HTTP | `tests/integration/` |
 | **End-to-End** | Jest + msw + child process | Full orchestrators spawned as child processes with env injection | `tests/e2e/` |
 
-### 13.2 Key Testing Rules
+### 14.2 Key Testing Rules
 
 - **`msw` not `nock`** — `nock` does not intercept Node.js native `fetch`
 - **`fs.mkdtemp` not `tmp`** — `tmp` has cleanup failures on Windows
 - **No `supertest`** — Use `createApp(jobsDir).listen(0)` + native `fetch`
 - **No `axios`** — Native `fetch` only
 
-### 13.3 msw Setup Pattern
+### 14.3 msw Setup Pattern
 
 ```javascript
 // tests/helpers/msw-setup.js
@@ -860,7 +1061,7 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 ```
 
-### 13.4 Child Process Env Injection (E2E)
+### 14.4 Child Process Env Injection (E2E)
 
 ```javascript
 execSync('node score.js --date 2026-05-30', {
@@ -874,7 +1075,7 @@ execSync('node score.js --date 2026-05-30', {
 });
 ```
 
-### 13.5 Coverage Thresholds
+### 14.5 Coverage Thresholds
 
 Per-file thresholds in `jest.config.js`:
 
@@ -891,21 +1092,21 @@ Per-file thresholds in `jest.config.js`:
 
 Global 80% threshold is added only at Phase 5.
 
-### 13.6 Fixtures — Never Modified
+### 14.6 Fixtures — Never Modified
 
 Test fixtures in `tests/fixtures/` are the contract. If a model's output does not match a fixture, fix the model — never modify the fixture.
 
 ---
 
-## 14. Coding Conventions & Constraints
+## 15. Coding Conventions & Constraints
 
-### 14.1 Module System
+### 15.1 Module System
 
 - **CommonJS** throughout — `require()` / `module.exports`
 - No ESM (`import`/`export`)
 - Node.js v24.11.1
 
-### 14.2 Package Dependencies
+### 15.2 Package Dependencies
 
 **Runtime (production):**
 - `express` ^4.18.0
@@ -921,7 +1122,7 @@ Test fixtures in `tests/fixtures/` are the contract. If a model's output does no
 
 **Forbidden:** `axios`, `nock`, `supertest`, `tmp`, `tmp-promise`, `minimist`, `yargs`
 
-### 14.3 Mandatory Rules (Non-Negotiable)
+### 15.3 Mandatory Rules (Non-Negotiable)
 
 1. **`require('dotenv').config()`** is the literal first line of every CLI script and `server/server.js`
 2. **No bare `console` calls** — use `src/lib/logger.js` only
@@ -936,7 +1137,7 @@ Test fixtures in `tests/fixtures/` are the contract. If a model's output does no
 11. **`applications.json` read once before the generate loop, written once after**
 12. **Job files read once before the generate loop into a Map**
 
-### 14.4 Error Handling Patterns
+### 15.4 Error Handling Patterns
 
 ```javascript
 // Custom errors (src/lib/errors.js)
@@ -952,7 +1153,7 @@ function validateConfigs(configDir, filenames) {
 }
 ```
 
-### 14.5 Pipeline ID Patterns
+### 15.5 Pipeline ID Patterns
 
 Application record IDs are generated as:
 ```javascript
@@ -963,7 +1164,7 @@ Application record IDs are generated as:
 
 ---
 
-## 15. Dependency Graph
+## 16. Dependency Graph
 
 ```
                     ┌───────────────┐

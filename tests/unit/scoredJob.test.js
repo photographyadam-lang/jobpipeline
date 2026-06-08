@@ -51,10 +51,14 @@ describe('parseScoreResponse', () => {
     const fixtureContent = loadFixture('sample_deepseek_score_response.json');
     const result = parseScoreResponse(fixtureContent);
 
+    // Fixture only has score, fit_signal, gap — enrichment fields get defaults
     expect(result).toEqual({
       score: 7,
       fitSignal: 'Strong alignment on governance program leadership and enterprise compliance scope. Meta experience maps directly to the regulatory delivery requirements.',
       gap: 'No direct healthcare domain experience.',
+      mustHaves: '—',
+      targetArchetype: '—',
+      matchedPillars: [],
     });
   });
 

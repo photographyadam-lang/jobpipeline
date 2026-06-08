@@ -33,6 +33,50 @@ const REQUIRED_CONFIGS = [
   'quality_prompt.md',
 ];
 
+// ── Static resume blocks (Hybrid Assembly Pattern) ─────────────────────────────
+// These are hardcoded invariants concatenated with the LLM-tailored core.
+// Never pass this content to the LLM — it must not mutate static boilerplate.
+
+const STATIC_RESUME_HEADER = [
+  '# Adam Buteux, MBA, CISSP, CIPM',
+  'Portland, Oregon (open to relocation) | adam@adambuteux.com | 929-218-3981 | [linkedin.com/in/adambuteux](https://www.linkedin.com/in/adambuteux)',
+  '',
+  'Most compliance leaders come from legal. I came from software engineering, with ten years of building enterprise applications before I moved into privacy and risk. That background changes how I work: at Meta, I used my technical fluency to design the classification framework that unblocked a DMA certification. At Audible, I built the privacy program from scratch, secured funding, and personally ran the technical assessment of 500+ applications.',
+  '',
+  '---',
+].join('\n');
+
+const STATIC_RESUME_FOOTER = [
+  '---',
+  '',
+  '## EDUCATION',
+  '',
+  '**Executive MBA** — Bayes Business School, London',
+  '**BSc Computer Science with Management** — King\'s College London',
+  '',
+  '---',
+  '',
+  '## CERTIFICATIONS',
+  '',
+  '**Active:** CISSP #703137 | CIPM #0005590021',
+  '',
+  '---',
+  '',
+  '## PUBLICATIONS',
+  '',
+  '**Introduction to Information Sharing and Analysis Organizations (ISAOs)**',
+  'Comprehensive guide on ISAOs and their role in cybersecurity.',
+  'https://www.isao.org/isao-100-1-introduction-to-isaos/',
+  '',
+  '**Introduction to Information Sharing**',
+  'Framework for effective information sharing in security operations.',
+  'https://www.isao.org/wp-content/uploads/2016/10/ISAO-300-1-Introduction-to-Information-Sharing-v1-01_Final.pdf',
+  '',
+  '**Substack (Flow Metrics Series)**',
+  'Original five-metric framework for diagnosing operational system performance.',
+  'https://substack.com/@adambuteux',
+].join('\n');
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /**
@@ -100,6 +144,33 @@ function getOutputDir(resumesDir, dateStr, company, title) {
   return path.join(resumesDir, dateStr, folderName);
 }
 
+/**
+ * Strip static boilerplate sections from the career profile before sending
+ * to the LLM. Removes the contact header block (everything before the first
+ * `---` separator) and all content from `## Education` onward (education,
+ * certifications, frameworks, publications).
+ *
+ * Only the Professional Summary and Work Experience sections remain — the
+ * LLM should only see what it needs to tailor.
+ *
+ * @param {string} careerContents - Full contents of adam_buteux_career.md.
+ * @returns {string} Stripped content with only dynamic sections.
+ */
+function stripCareerForLlm(careerContents) {
+  // Remove everything through the first `---` separator (contact header)
+  const firstSep = careerContents.indexOf('\n---\n');
+  let stripped = firstSep === -1 ? careerContents : careerContents.slice(firstSep + 5);
+
+  // Remove everything from `## Education` onward (static credentials)
+  const eduMarker = '\n## Education';
+  const eduIdx = stripped.indexOf(eduMarker);
+  if (eduIdx !== -1) {
+    stripped = stripped.slice(0, eduIdx);
+  }
+
+  return stripped.trim();
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────────
 (async function main() {
   // 1. Parse CLI arguments
@@ -149,6 +220,9 @@ function getOutputDir(resumesDir, dateStr, company, title) {
     }
     process.exit(1);
   }
+
+  // 2b. Strip static sections from career for LLM context window
+  const strippedCareer = stripCareerForLlm(careerContents);
 
   // 3. Read stack rank for the target date
   let stackRankContent;
@@ -241,12 +315,15 @@ function getOutputDir(resumesDir, dateStr, company, title) {
       }
     }
 
-    // c. Call 1 — Resume generation
-    let resumeContent;
+    // c. Call 1 — Resume generation (Hybrid Assembly Pattern)
+    // Phase 1: Static header — hardcoded invariant (STATIC_RESUME_HEADER)
+    // Phase 2: LLM generates only the tailored core (Professional Exp + Projects)
+    // Phase 3: Static footer — hardcoded invariant (STATIC_RESUME_FOOTER)
+    let llmTailoredCore;
     try {
-      resumeContent = await callDeepSeek(
+      llmTailoredCore = await callDeepSeek(
         resumeSystemPrompt,
-        buildResumePrompt(careerContents, pillarContents, scoredJob),
+        buildResumePrompt(strippedCareer, pillarContents, scoredJob, 'OUTPUT ONLY the ## PROFESSIONAL EXPERIENCE and ## INDEPENDENT PROJECTS sections in clean markdown. Omit any header, contact block, footer, EDUCATION, CERTIFICATIONS, PUBLICATIONS, or formatting explanations.'),
         { maxTokens: 2000, timeoutMs: 60000 }
       );
     } catch (err) {
@@ -261,6 +338,9 @@ function getOutputDir(resumesDir, dateStr, company, title) {
       });
       continue;
     }
+
+    // Hybrid assembly: stitch static header + LLM tailored core + static footer
+    const resumeContent = `${STATIC_RESUME_HEADER}\n\n${llmTailoredCore}\n\n${STATIC_RESUME_FOOTER}`;
 
     // d. Call 2 — Cover letter generation
     let coverLetterContent;

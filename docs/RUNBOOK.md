@@ -1,7 +1,7 @@
 # Job Pipeline — Production Runbook
 
-> **Version:** 1.2
-> **Last updated:** 2026-06-03
+> **Version:** 1.3
+> **Last updated:** 2026-06-08
 > **Maintainer:** Pipeline operator
 
 ---
@@ -692,6 +692,8 @@ Missing config file(s):
 | Timeout | Network or overload | Retry the job. Default timeout is 30s for scoring, 60s for generation. |
 
 **Note:** Errors on individual jobs only skip that job — the rest of the pipeline continues unaffected.
+
+For a complete reference on how LLM calls are assembled, dispatched, parsed, and error-handled, see [Section 11 — LLM Integration](docs/architecture.md#11-llm-integration) in the architecture guide.
 
 ### 11.4 Server won't start
 

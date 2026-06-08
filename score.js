@@ -120,7 +120,7 @@ const REQUIRED_CONFIGS = ['scoring_prompt.md', 'adam_buteux_career.md'];
     // b. Call DeepSeek
     let rawResponse;
     try {
-      rawResponse = await callDeepSeek(scoringSystemPrompt, userPrompt, { maxTokens: 300 });
+      rawResponse = await callDeepSeek(scoringSystemPrompt, userPrompt, { maxTokens: 1024 });
     } catch (err) {
       logger.error('[score]', `DeepSeek error for ${job.filename}: ${err.message}`);
       broadcastEvent('job_skipped', { filename: job.filename, reason: err.message });

@@ -57,7 +57,7 @@ function buildScoringPrompt(careerContents, jobFile) {
  * @returns {string} Formatted user message.
  * @throws {Error} If any argument is missing or invalid.
  */
-function buildResumePrompt(careerContents, pillarContents, scoredJob) {
+function buildResumePrompt(careerContents, pillarContents, scoredJob, outputInstruction) {
   if (!careerContents || typeof careerContents !== 'string') {
     throw new Error('buildResumePrompt: careerContents must be a non-empty string');
   }
@@ -77,7 +77,7 @@ function buildResumePrompt(careerContents, pillarContents, scoredJob) {
     throw new Error('buildResumePrompt: scoredJob.gap must be a string');
   }
 
-  return [
+  const parts = [
     'CAREER HISTORY:',
     '',
     careerContents,
@@ -95,7 +95,13 @@ function buildResumePrompt(careerContents, pillarContents, scoredJob) {
     '',
     'GAP:',
     scoredJob.gap,
-  ].join('\n');
+  ];
+
+  if (outputInstruction) {
+    parts.push('', outputInstruction);
+  }
+
+  return parts.join('\n');
 }
 
 /**

@@ -30,6 +30,9 @@ function makeScoredJob(overrides = {}) {
     score: 8,
     fitSignal: 'Strong alignment on governance program leadership and enterprise compliance scope.',
     gap: 'No direct healthcare domain experience.',
+    mustHaves: 'Healthcare privacy domain expertise, program-building at scale, executive stakeholder management',
+    targetArchetype: 'A hands-on governance program builder who can construct the operating model for privacy at a healthcare technology company, balancing regulatory delivery with engineering team partnership.',
+    matchedPillars: ['Pillar 1', 'Pillar 4', 'Pillar 8'],
     rank: 1,
     actionFlag: 'DEEP_TAILOR',
     ...overrides,
@@ -290,6 +293,79 @@ describe('formatStackRank', () => {
 
     // harvested instanceof Date is false; uses String()
     expect(result).toContain('**Harvested:** 2026-05-30 09:14');
+  });
+
+  // ── Enrichment fields (mustHaves, targetArchetype, matchedPillars) ──
+
+  it('renders Must-Haves field in each job entry', () => {
+    const jobs = [makeScoredJob({ mustHaves: 'Domain expertise in privacy, regulatory delivery at scale' })];
+    const result = formatStackRank(jobs, testDate, [], makeStats());
+
+    expect(result).toContain('**Must-Haves:** Domain expertise in privacy, regulatory delivery at scale');
+  });
+
+  it('renders Target Archetype field in each job entry', () => {
+    const jobs = [makeScoredJob({ targetArchetype: 'A builder who constructs governance programs from scratch.' })];
+    const result = formatStackRank(jobs, testDate, [], makeStats());
+
+    expect(result).toContain('**Target Archetype:** A builder who constructs governance programs from scratch.');
+  });
+
+  it('renders Pillar Library Matches as comma-separated list', () => {
+    const jobs = [makeScoredJob({ matchedPillars: ['Pillar 2', 'Pillar 5'] })];
+    const result = formatStackRank(jobs, testDate, [], makeStats());
+
+    expect(result).toContain('**Pillar Library Matches:** Pillar 2, Pillar 5');
+  });
+
+  it('handles null enrichment fields gracefully with em-dash placeholder', () => {
+    const jobs = [makeScoredJob({
+      mustHaves: null,
+      targetArchetype: null,
+      matchedPillars: null,
+    })];
+    const result = formatStackRank(jobs, testDate, [], makeStats());
+
+    expect(result).toContain('**Must-Haves:** —');
+    expect(result).toContain('**Target Archetype:** —');
+    expect(result).toContain('**Pillar Library Matches:** —');
+  });
+
+  it('handles undefined enrichment fields gracefully with em-dash placeholder', () => {
+    const jobs = [makeScoredJob({
+      mustHaves: undefined,
+      targetArchetype: undefined,
+      matchedPillars: undefined,
+    })];
+    const result = formatStackRank(jobs, testDate, [], makeStats());
+
+    expect(result).toContain('**Must-Haves:** —');
+    expect(result).toContain('**Target Archetype:** —');
+    expect(result).toContain('**Pillar Library Matches:** —');
+  });
+
+  it('handles empty matchedPillars array gracefully', () => {
+    const jobs = [makeScoredJob({ matchedPillars: [] })];
+    const result = formatStackRank(jobs, testDate, [], makeStats());
+
+    expect(result).toContain('**Pillar Library Matches:** ');
+  });
+
+  it('does not break parseStackRank round-trip with enrichment fields present', () => {
+    const jobs = [
+      makeScoredJob({ rank: 1, score: 8, actionFlag: 'DEEP_TAILOR' }),
+      makeScoredJob({ rank: 2, score: 6, actionFlag: 'AUTO_GENERATED', filename: 'sample_job_2.md', linkedInJobId: '1122334455', salary: null }),
+    ];
+    const markdown = formatStackRank(jobs, testDate, [], makeStats());
+    const parsed = parseStackRank(markdown);
+
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].sourceFilename).toBe('sample_job_1.md');
+    expect(parsed[1].sourceFilename).toBe('sample_job_2.md');
+    // Confirm the enrichment fields appear in the raw markdown
+    expect(markdown).toContain('**Must-Haves:**');
+    expect(markdown).toContain('**Target Archetype:**');
+    expect(markdown).toContain('**Pillar Library Matches:**');
   });
 });
 

@@ -235,7 +235,7 @@ describe('generate.js', () => {
     ]);
     await writeStackRank(tmpDir, defaultDate, stackRank);
 
-    const { stdout } = runGenerate(tmpDir);
+    const { stdout } = runGenerate(tmpDir, {}, '--date=2026-06-02');
 
     // Completion banner
     expect(stdout).toMatch(/Done\. 2 packages written/);
@@ -292,7 +292,7 @@ describe('generate.js', () => {
     ]);
     await writeStackRank(tmpDir, defaultDate, stackRank);
 
-    const { stdout } = runGenerate(tmpDir);
+    const { stdout } = runGenerate(tmpDir, {}, '--date=2026-06-02');
 
     // Only 1 package generated (NO_DOCS filtered out)
     expect(stdout).toMatch(/Done\. 1 packages written/);
@@ -325,11 +325,11 @@ describe('generate.js', () => {
     await writeStackRank(tmpDir, defaultDate, stackRank);
 
     // First run
-    const { stdout: run1 } = runGenerate(tmpDir);
+    const { stdout: run1 } = runGenerate(tmpDir, {}, '--date=2026-06-02');
     expect(run1).toMatch(/Done\. 1 packages written/);
 
     // Second run — should skip existing
-    const { stdout: run2 } = runGenerate(tmpDir);
+    const { stdout: run2 } = runGenerate(tmpDir, {}, '--date=2026-06-02');
     expect(run2).toMatch(/output already exists/);
     expect(run2).toMatch(/Done\. 0 packages written/);
 
@@ -356,7 +356,7 @@ describe('generate.js', () => {
     ]);
     await writeStackRank(tmpDir, defaultDate, stackRank);
 
-    const { stdout } = runGenerate(tmpDir);
+    const { stdout } = runGenerate(tmpDir, {}, '--date=2026-06-02');
 
     // Should log warning about cleanup having run
     expect(stdout).toMatch(/cleanup may have run/);
@@ -407,7 +407,7 @@ describe('generate.js', () => {
     // Use quality-fail msw handler by overriding NODE_OPTIONS
     const { stdout } = runGenerate(tmpDir, {
       NODE_OPTIONS: '--require ' + path.join(PROJECT_ROOT, 'tests/helpers/msw-generate-quality-fail.js'),
-    });
+    }, '--date=2026-06-02');
 
     // Should log quality assessment failure warning
     expect(stdout).toMatch(/Quality assessment failed/);
@@ -468,7 +468,7 @@ describe('generate.js', () => {
     ]);
     await writeStackRank(tmpDir, defaultDate, stackRank);
 
-    const { stdout } = runGenerate(tmpDir);
+    const { stdout } = runGenerate(tmpDir, {}, '--date=2026-06-02');
     expect(stdout).toMatch(/Done\. 1 packages written/);
 
     // Verify existing record is preserved alongside new record
@@ -493,7 +493,7 @@ describe('generate.js', () => {
     ]);
     await writeStackRank(tmpDir, defaultDate, stackRank);
 
-    const { stdout } = runGenerate(tmpDir);
+    const { stdout } = runGenerate(tmpDir, {}, '--date=2026-06-02');
     expect(stdout).toMatch(/Done\. 1 packages written/);
 
     const appRecords = JSON.parse(await fs.readFile(path.join(tmpDir, 'applications.json'), 'utf-8'));
@@ -533,7 +533,7 @@ describe('generate.js', () => {
     ]);
     await writeStackRank(tmpDir, defaultDate, stackRank);
 
-    const { stdout } = runGenerate(tmpDir);
+    const { stdout } = runGenerate(tmpDir, {}, '--date=2026-06-02');
 
     // stdout should contain the company name from the stack rank entry
     expect(stdout).toContain('Meridian Health Systems');
@@ -594,10 +594,54 @@ describe('generate.js', () => {
     ]);
     await writeStackRank(tmpDir, defaultDate, stackRank);
 
-    const { stdout } = runGenerate(tmpDir);
+    const { stdout } = runGenerate(tmpDir, {}, '--date=2026-06-02');
 
     // Progress lines with job number and ETA
     expect(stdout).toMatch(/1\/2:.*est\. \d+s remaining/);
     expect(stdout).toMatch(/2\/2:.*est\. \d+s remaining/);
+  });
+
+  // ── Test 13: Hybrid assembly — static header and footer appear verbatim ─
+  it('hybrid assembly includes static header and footer verbatim', async () => {
+    await copyFixture(tmpDir, 'sample_job_1.md');
+
+    const stackRank = buildStackRank(defaultDate, [
+      stackRankEntry(1, 7, 'DEEP_TAILOR', 'Meridian Health Systems', 'Senior Privacy Manager',
+        'sample_job_1.md', '3987654321', 'https://www.linkedin.com/jobs/view/3987654321',
+        'Strong alignment on governance program leadership.',
+        'No direct healthcare domain experience.'),
+    ]);
+    await writeStackRank(tmpDir, defaultDate, stackRank);
+
+    const { stdout } = runGenerate(tmpDir, {}, '--date=2026-06-02');
+    expect(stdout).toMatch(/Done\. 1 packages written/);
+
+    const folder = outputFolderName('Meridian Health Systems', 'Senior Privacy Manager');
+    const outputDir = path.join(tmpDir, 'resumes', defaultDate, folder);
+    const resumeContent = await fs.readFile(path.join(outputDir, 'resume.md'), 'utf-8');
+
+    // Static header: name and contact matrix appear verbatim
+    expect(resumeContent).toContain('Adam Buteux, MBA, CISSP, CIPM');
+    expect(resumeContent).toContain('Portland, Oregon (open to relocation)');
+    expect(resumeContent).toContain('adam@adambuteux.com');
+    expect(resumeContent).toContain('Most compliance leaders come from legal');
+
+    // Static footer: education, certifications, publications sections appear
+    expect(resumeContent).toContain('## EDUCATION');
+    expect(resumeContent).toContain('**Executive MBA** — Bayes Business School, London');
+    expect(resumeContent).toContain('## CERTIFICATIONS');
+    expect(resumeContent).toContain('**Active:** CISSP #703137 | CIPM #0005590021');
+    expect(resumeContent).toContain('## PUBLICATIONS');
+    expect(resumeContent).toContain('Introduction to Information Sharing and Analysis Organizations (ISAOs)');
+    expect(resumeContent).toContain('https://www.isao.org/isao-100-1-introduction-to-isaos/');
+    expect(resumeContent).toContain('https://substack.com/@adambuteux');
+
+    // The LLM tailored core (Professional Experience + Independent Projects) is present
+    expect(resumeContent).toContain('## PROFESSIONAL EXPERIENCE');
+    expect(resumeContent).toContain('## INDEPENDENT PROJECTS');
+
+    // Only one H1 in the entire document (from static header)
+    const h1Matches = resumeContent.match(/^# /gm);
+    expect(h1Matches).toHaveLength(1);
   });
 });

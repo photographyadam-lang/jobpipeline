@@ -93,6 +93,10 @@ function formatStackRank(rankedJobs, date, fuzzyWarnings, stats) {
     lines.push('');
     lines.push(`**Fit:** ${job.fitSignal}`);
     lines.push(`**Gap:** ${job.gap}`);
+    lines.push(`**Must-Haves:** ${job.mustHaves ?? '—'}`);
+    lines.push(`**Target Archetype:** ${job.targetArchetype ?? '—'}`);
+    const pillarStr = Array.isArray(job.matchedPillars) ? job.matchedPillars.join(', ') : '—';
+    lines.push(`**Pillar Library Matches:** ${pillarStr}`);
     lines.push('');
     lines.push('---');
   }
