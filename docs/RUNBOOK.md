@@ -1,6 +1,6 @@
 # Job Pipeline — Production Runbook
 
-> **Version:** 1.3
+> **Version:** 1.4
 > **Last updated:** 2026-06-08
 > **Maintainer:** Pipeline operator
 
@@ -14,24 +14,26 @@
 4. [Stage 2: Prioritization (Scoring)](#4-stage-2-prioritization-scoring)
 5. [Stage 3: Customization (Generation)](#5-stage-3-customization-generation)
 6. [Stage 4: Archiving (Cleanup)](#6-stage-4-archiving-cleanup)
-7. [Dashboard Pipeline Controls](#7-dashboard-pipeline-controls)
-8. [Application Tracking](#8-application-tracking)
-9. [Cross-Day Workflow](#9-cross-day-workflow)
-10. [Quality Assurance](#10-quality-assurance)
-11. [Troubleshooting Protocols](#11-troubleshooting-protocols)
-12. [File Reference](#12-file-reference)
+7. [Forensic Audit Review (review.js)](#7-forensic-audit-review-reviewjs)
+8. [Dashboard Pipeline Controls](#8-dashboard-pipeline-controls)
+9. [Application Tracking](#9-application-tracking)
+10. [Cross-Day Workflow](#10-cross-day-workflow)
+11. [Quality Assurance](#11-quality-assurance)
+12. [Troubleshooting Protocols](#12-troubleshooting-protocols)
+13. [File Reference](#13-file-reference)
 
 ---
 
 ## 1. Overview
 
-The pipeline processes LinkedIn job descriptions through four main stages:
+The pipeline processes LinkedIn job descriptions through five main stages:
 
 | Stage | Script | Purpose |
 |-------|--------|---------|
 | Ingestion | `node server/server.js` + bookmarklet **or** dashboard form | Harvest job descriptions from LinkedIn |
 | Prioritization | `node score.js` | Score jobs against your profile, build stack rank |
 | Customization | `node generate.js` | Generate resumes, cover letters, quality ratings |
+| Review | `node review.js` | Forensic audit of generated application packages |
 | Archiving | `node cleanup.js` | Archive completed job files for the day |
 
 Additional utilities:
@@ -55,6 +57,7 @@ node server/server.js
 # Terminal 2 — After harvesting
 node score.js
 node generate.js
+node review.js      # optional — forensic audit of packages
 node cleanup.js
 ```
 
@@ -110,7 +113,8 @@ resumes/YYYY-MM-DD/
   └── Company - Title/ # Per-job output directory
        ├── resume.md
        ├── cover_letter.md
-       └── submission_record.md
+       ├── submission_record.md
+       └── forensic_audit.md  # (created by review.js)
 applications.json      # Persistent application log (auto-created)
 ```
 
@@ -349,37 +353,41 @@ npm run generate
 This command:
 
 1. **Loads config files:** `resume_prompt.md`, `cover_letter_prompt.md`, `quality_prompt.md`, `adam_buteux_career.md`, `pillar_library.md`
-2. **Reads the stack rank file** for today's date via `fileStore.readStackRank()`
-3. **Parses qualifying jobs** from the stack rank (`DEEP_TAILOR` and `AUTO_GENERATED` only)
-4. **I/O optimization — reads `applications.json` ONCE** before the main loop (never inside the loop)
-5. **I/O optimization — reads all job files ONCE** into an in-memory `Map` keyed by filename (never inside the loop)
-6. For each qualifying job in a **sequential** loop:
+2. **Strips static sections from career profile** — removes contact header and all content from `## Education` onward before sending to the LLM (saves tokens, prevents LLM from rewriting static credentials)
+3. **Reads the stack rank file** for today's date via `fileStore.readStackRank()`
+4. **Parses qualifying jobs** from the stack rank (`DEEP_TAILOR` and `AUTO_GENERATED` only)
+5. **I/O optimization — reads `applications.json` ONCE** before the main loop (never inside the loop)
+6. **I/O optimization — reads all job files ONCE** into an in-memory `Map` keyed by filename (never inside the loop)
+7. For each qualifying job in a **sequential** loop:
    - Looks up the source job content from the in-memory `Map` by `sourceFilename`
    - Parses the job file to get the full `JobFile` object
    - Extracts `fitSignal` and `gap` from the raw stack rank markdown using regex on `**Fit:**` / `**Gap:**` patterns
    - Builds a ScoredJob-like object combining stack rank data + job file data
    - Checks if output directory already exists (idempotent skip)
-   - **Call 1:** Generates a tailored resume via DeepSeek (maxTokens: 2000, timeout: 60s)
+   - **Call 1 — Resume (Hybrid Assembly Pattern):** LLM generates only the tailored core (Professional Experience + Independent Projects). Static header and footer (contact info, Education, Certifications, Publications) are hardcoded invariants — never passed to the LLM.
    - **Call 2:** Generates a tailored cover letter via DeepSeek (maxTokens: 800, timeout: 60s) — on failure, sets `coverLetterContent` to `null` and continues
    - **Call 3:** Rates quality of both documents via DeepSeek (maxTokens: 200, timeout: 30s) — on failure, sets quality fields to `null` and continues
+   - Stitches final resume: static header + LLM tailored core + static footer
    - Writes `resume.md` and `cover_letter.md` to the output directory
    - Writes `submission_record.md` with metadata
    - Accumulates an `ApplicationRecord` into an in-memory array
    - Broadcasts `doc_generated` event with quality scores and `sourceFilename`
-7. **I/O optimization — writes `applications.json` ONCE** after the loop with all new records appended
+   - Logs a warning if resume or cover letter quality is below 6
+8. **I/O optimization — writes `applications.json` ONCE** after the loop with all new records appended
 
 ### 5.2 Understand the output
 
-Each job produces a directory with three files:
+Each job produces a directory with three files (plus a forensic audit file if `review.js` was run):
 
 ```
 resumes/2026-06-03/Meridian-Health-Systems-Senior-Privacy-Manager/
-├── resume.md              # Tailored resume (from Pillar Library)
+├── resume.md              # Tailored resume (Hybrid Assembly — static header/footer + LLM core)
 ├── cover_letter.md        # Tailored cover letter
-└── submission_record.md   # Metadata record
+├── submission_record.md   # Metadata record
+└── forensic_audit.md      # Forensic audit report (created by review.js)
 ```
 
-**`resume.md`** — Structured with sections: Summary, Professional Experience, Independent Projects, Education, Certifications. Built from the pillar library — never invents content.
+**`resume.md`** — Built using the **Hybrid Assembly Pattern**: a hardcoded static header (contact info + professional summary) and footer (Education, Certifications, Publications) sandwich an LLM-tailored core (Professional Experience + Independent Projects). The LLM only generates the middle section — static boilerplate never enters the prompt context window.
 
 **`cover_letter.md`** — Concise (< 300 words). Paragraphs selected based on available angles.
 
@@ -509,15 +517,81 @@ Recommended order:
 ```powershell
 node score.js       # Stage 2 — prioritize all harvested jobs
 node generate.js    # Stage 3 — generate documents for qualifying jobs
+node review.js      # Stage 3b — (optional) forensic audit of generated packages
 node cleanup.js     # Stage 4 — archive job files
 # Ctrl+C the server in Terminal 1
 ```
 
-**Important:** Run `generate.js` **before** `cleanup.js`. The generate script needs the original job files in `jobs/` to look up job descriptions. If you archive first, generate will skip jobs with "source file not found" warnings.
+**Important:** Run `generate.js` **before** `cleanup.js`. The generate script needs the original job files in `jobs/` to look up job descriptions. If you archive first, generate will skip jobs with "source file not found" warnings. Similarly, run `review.js` before `cleanup.js` — it also needs the original job files.
 
 ---
 
-## 7. Dashboard Pipeline Controls
+## 7. Forensic Audit Review (review.js)
+
+The pipeline includes an optional **Forensic Audit Review** stage that evaluates generated application packages before submission. This is not a mandatory stage — it provides an additional quality gate for candidates who want a recruiter-perspective critique.
+
+### 7.1 Run the review
+
+```powershell
+npm run review
+```
+
+Or with a specific date:
+
+```powershell
+npm run review -- --date=2026-06-03
+```
+
+This command:
+
+1. **Reads the stack rank file** for today's date
+2. **Parses qualifying jobs** (`DEEP_TAILOR` and `AUTO_GENERATED` only)
+3. **I/O optimization — reads job files ONCE** into an in-memory `Map` keyed by filename (before the loop)
+4. For each qualifying job in a **sequential** loop:
+   - Looks up the source job content from the in-memory `Map`
+   - Reads the generated `resume.md` and `cover_letter.md` from the job's output directory
+   - **Call 1 — Forensic Audit Narrative:** Calls DeepSeek with an elite-recruiter persona system prompt to generate a 2-section critique:
+     - **Identity Projection (6-Second Scan):** What professional identity does the application project?
+     - **Filler & Over-Qualification Analysis:** Identifies unlinked filler sections and over-qualification risks
+     - **Call 2 — Keyword Extraction:** Calls DeepSeek to extract the top 10 critical keywords from the job description
+     - **Programmatic keyword frequency count:** Uses `countKeywordFrequencies()` from [`src/lib/reviewUtils.js`](src/lib/reviewUtils.js) to count keyword occurrences in the resume. Each keyword is normalized via `normalizeKeyword()` — a multi-step pipeline that lowercases, strips punctuation, strips possessives, and normalizes pluralization markers. An **over-stripping guardrail** protects domain-critical terms ending naturally in `s` (e.g., `business`, `process`, `access`, `analysis`) from being clipped. Word-boundary-aware regex ensures exact substring matching with no false partial matches.
+   - Writes `forensic_audit.md` to the job's output directory containing both the narrative analysis and keyword frequency table
+   - Broadcasts `job_reviewed` SSE event
+   - On failure: broadcasts `job_skipped` and continues to next job
+5. Broadcasts `review_complete`
+
+### 7.2 Understand the output
+
+Each reviewed job gets a `forensic_audit.md` file in its output directory:
+
+```
+resumes/2026-06-03/Meridian-Health-Systems-Senior-Privacy-Manager/
+├── resume.md
+├── cover_letter.md
+├── submission_record.md
+└── forensic_audit.md      # ← created by review.js
+```
+
+**`forensic_audit.md`** contains:
+- **## Identity Projection** — LLM assessment of the professional identity the application conveys
+- **## Filler & Over-Qualification Analysis** — LLM flagging of weak sections and mismatches
+- **## Keyword Frequency Table** — Programmatic frequency count of the top 10 job keywords in the resume
+
+### 7.3 When to run review
+
+| Scenario | Recommendation |
+|----------|---------------|
+| Before submitting an application | Run review to catch filler sections or identity mismatches |
+| After generating multiple packages | Batch review all packages in one pass |
+| Skipping review entirely | Optional — generation produces complete packages without it |
+
+### 7.4 Review and cleanup
+
+Like `generate.js`, the review script needs the original job files in `jobs/` to run. Run `review.js` **before** `cleanup.js`.
+
+---
+
+## 8. Dashboard Pipeline Controls
 
 The dashboard includes built-in buttons to run pipeline stages directly from the UI.
 
@@ -527,7 +601,9 @@ The dashboard includes built-in buttons to run pipeline stages directly from the
 |--------|--------|---------------|
 | **Run Score** | Spawns `npm run score` as a child process | `node score.js` |
 | **Run Generate** | Spawns `npm run generate` as a child process | `node generate.js` |
+| **Run Review** | Spawns `npm run review` as a child process | `node review.js` |
 | **Run QA** | Spawns `npm run qa` as a child process | `node src/qa.js` |
+| **Run Cleanup** | Spawns `npm run cleanup` as a child process | `node cleanup.js` |
 
 ### 7.2 How it works
 
@@ -545,15 +621,17 @@ The dashboard includes built-in buttons to run pipeline stages directly from the
 | Quick re-score after fixing a job file | Dashboard button |
 | Running generate after scoring from CLI | Either works |
 | QA evaluation | Dashboard button or `npm run qa` |
+| Running review after generation | Dashboard button or CLI |
+| Reviewing packages before submission | CLI — review.js output is markdown files |
 | Debugging (need to see full output) | CLI (terminal output is persistent) |
 
 ---
 
-## 8. Application Tracking
+## 9. Application Tracking
 
 Application status tracking is handled through the dashboard UI, not a CLI script.
 
-### 8.1 View application history
+### 9.1 View application history
 
 After generation, the dashboard shows your application history in a table at the bottom of the page. Each row includes:
 - Company and title
@@ -563,7 +641,7 @@ After generation, the dashboard shows your application history in a table at the
 - Date generated
 - Date applied (if applicable)
 
-### 8.2 Mark an application as applied
+### 9.2 Mark an application as applied
 
 1. From the dashboard, find the application in the "Application History" section
 2. Click the **"Mark Applied"** button next to the entry
@@ -573,14 +651,14 @@ After generation, the dashboard shows your application history in a table at the
    - Sets `dateApplied` to today's date
 5. The dashboard refreshes to show the updated status
 
-### 8.3 Open output folder
+### 9.3 Open output folder
 
 Click the **"Open Folder"** button next to any application entry in the dashboard. This:
 1. Sends `POST /api/applications/open-folder` with the application `id`
 2. The server looks up the `outputPath` from `applications.json`
 3. Opens the folder in Windows Explorer
 
-### 8.4 Valid statuses
+### 9.4 Valid statuses
 
 | Status | Meaning |
 |--------|---------|
@@ -593,7 +671,7 @@ Click the **"Open Folder"** button next to any application entry in the dashboar
 
 ---
 
-## 9. Cross-Day Workflow
+## 10. Cross-Day Workflow
 
 ### Scenario: You scored yesterday but didn't generate
 
@@ -629,9 +707,9 @@ If `cleanup.js` has already run but you need to re-generate:
 
 ---
 
-## 10. Quality Assurance
+## 11. Quality Assurance
 
-### 10.1 Run QA evaluation
+### 11.1 Run QA evaluation
 
 ```powershell
 npm run qa
@@ -644,7 +722,7 @@ This command:
 4. Produces a QA assessment report
 5. Broadcasts a `qa_complete` SSE event if the server is running
 
-### 10.2 When to run QA
+### 11.2 When to run QA
 
 - After generation is complete, before submitting applications
 - To check if resume/cover letter quality needs improvement
@@ -652,9 +730,9 @@ This command:
 
 ---
 
-## 11. Troubleshooting Protocols
+## 12. Troubleshooting Protocols
 
-### 11.1 Missing API key
+### 12.1 Missing API key
 
 **Symptom:** Script exits immediately with `ConfigMissingError`.
 
@@ -669,7 +747,7 @@ This command:
 4. Run `node -e "require('dotenv').config(); console.log(process.env.DEEPSEEK_API_KEY)"` to check the key loads
 5. If still failing, copy `.env.example` to `.env` and re-enter the key
 
-### 11.2 Missing config file
+### 12.2 Missing config file
 
 **Symptom:** Script exits with code 1 listing missing config files.
 
@@ -680,7 +758,7 @@ Missing config file(s):
 
 **Fix:** Ensure all required config files exist in `config/`. See [Section 2.2](#22-config-files) for the full list. These files are human-authored — the pipeline creates none of them.
 
-### 11.3 DeepSeek API errors
+### 12.3 DeepSeek API errors
 
 **Symptom:** Individual jobs are skipped with `DeepSeekResponseError`.
 
@@ -695,7 +773,7 @@ Missing config file(s):
 
 For a complete reference on how LLM calls are assembled, dispatched, parsed, and error-handled, see [Section 11 — LLM Integration](docs/architecture.md#11-llm-integration) in the architecture guide.
 
-### 11.4 Server won't start
+### 12.4 Server won't start
 
 **Symptom:** `node server/server.js` fails.
 
@@ -715,7 +793,7 @@ netstat -ano | findstr :3000
 taskkill /PID [number] /F
 ```
 
-### 11.5 Stack rank file not found by generate.js
+### 12.5 Stack rank file not found by generate.js
 
 **Symptom:**
 ```
@@ -726,7 +804,7 @@ No stack rank for YYYY-MM-DD. Run: node score.js --date=YYYY-MM-DD
 - Run `node score.js` first to generate the stack rank for today
 - Or use `--date` to point to an existing stack rank: `node generate.js --date=2026-05-28`
 
-### 11.6 Source file not found by generate.js
+### 12.6 Source file not found by generate.js
 
 **Symptom:**
 ```
@@ -737,7 +815,7 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 - Restore files from `archive/YYYY-MM-DD/` back to `jobs/` before running `generate.js`
 - Or run `generate.js` before `cleanup.js` in your workflow
 
-### 11.7 Dashboard not showing updates
+### 12.7 Dashboard not showing updates
 
 **Symptom:** Dashboard loads but no real-time updates appear.
 
@@ -749,7 +827,7 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 
 **Fallback:** If the dashboard is unavailable, the pipeline still runs correctly — events simply aren't displayed. The `eventBroadcaster` module never throws, so a missing dashboard won't crash the pipeline.
 
-### 11.8 Bookmarklet not working
+### 12.8 Bookmarklet not working
 
 **Symptom:** Clicking the bookmarklet does nothing or shows an alert.
 
@@ -763,7 +841,7 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 
 **Alternative:** Use the **Manual AI Ingestion Platform** on the dashboard instead — it does not depend on LinkedIn DOM structure.
 
-### 11.9 Poor quality scores
+### 12.9 Poor quality scores
 
 **Symptom:** Quality scores consistently below 6.
 
@@ -773,7 +851,7 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 3. **Job descriptions too sparse** — Some LinkedIn listings have minimal text; the AI has less to work with
 4. **Cover letter paragraph 2 omitted** — If no specific angle exists, the AI correctly skips it, lowering the word count and potentially the score
 
-### 11.10 Manual AI Ingestion failures
+### 12.10 Manual AI Ingestion failures
 
 **Symptom:** The "Harvest via AI Engine" button returns an error.
 
@@ -790,7 +868,7 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 - Include the job title, company name, and all description sections
 - More text = better AI extraction. If text is truncated, the extraction quality drops.
 
-### 11.11 Applications.json corruption
+### 12.11 Applications.json corruption
 
 **Symptom:** `generate.js` errors related to `applications.json`.
 
@@ -799,7 +877,7 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 2. If corrupted, the last backup is the previous version (the file is overwritten, not appended)
 3. As a last resort, set `applications.json` to `[]` — the pipeline creates a fresh file on the next write
 
-### 11.12 Network/connectivity issues
+### 12.12 Network/connectivity issues
 
 **Symptom:** All DeepSeek calls fail with timeout or network errors.
 
@@ -809,21 +887,21 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 3. Check firewall/proxy settings
 4. Check DeepSeek service status
 
-### 11.13 Pipeline button in dashboard shows error
+### 12.13 Pipeline button in dashboard shows error
 
 **Symptom:** Clicking "Run Score" or "Run Generate" in the dashboard shows an error toast.
 
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `Pipeline process already running` | A previous run hasn't finished | Wait for it to complete, or restart the server |
-| `Invalid task` | Unknown task name | Only `score`, `generate`, and `qa` are valid |
+| `Invalid task` | Unknown task name | Only `score`, `generate`, `qa`, `cleanup`, and `review` are valid |
 | Process exits with code 1 | Script error | Check the live log panel for error details |
 
 ---
 
-## 12. File Reference
+## 13. File Reference
 
-### 12.1 Source modules
+### 13.1 Source modules
 
 | File | Purpose |
 |------|---------|
@@ -840,17 +918,19 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 | `src/lib/deduplicator.js` | Two-pass deduplication (URL exact + fuzzy company/title) |
 | `src/lib/ranker.js` | Stack ranking logic (dense ranking, action flag assignment, straddle rule) |
 | `src/lib/promptBuilder.js` | Prompt assembly for all DeepSeek calls (scoring, resume, cover letter, quality) |
+| `src/lib/reviewUtils.js` | Keyword normalization (`normalizeKeyword`) and frequency counting (`countKeywordFrequencies`) with over-stripping guardrail and word-boundary-aware matching |
 
-### 12.2 Orchestrators
+### 13.2 Orchestrators
 
 | File | Purpose |
 |------|---------|
 | `score.js` | Scoring orchestrator — reads jobs, validates configs, scores via DeepSeek, ranks, writes stack rank, broadcasts events |
-| `generate.js` | Generation orchestrator — reads stack rank, parses qualifying jobs, generates docs, writes applications.json, broadcasts events |
+| `generate.js` | Generation orchestrator — reads stack rank, parses qualifying jobs, generates docs (Hybrid Assembly Pattern), writes applications.json, broadcasts events |
+| `review.js` | Forensic audit review — reads stack rank and generated docs, performs forensic audit narrative + keyword extraction, writes forensic_audit.md, broadcasts events |
 | `cleanup.js` | Archive orchestrator — moves job files from `jobs/` to `archive/YYYY-MM-DD/` |
 | `src/qa.js` | QA evaluation — reads generated docs and evaluates quality via DeepSeek |
 
-### 12.3 Server
+### 13.3 Server
 
 | File | Purpose |
 |------|---------|
@@ -860,7 +940,7 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 | `server/bookmarklet.min.js` | Minified bookmarklet (generated by `npm run build:bookmarklet`) |
 | `scripts/minify-bookmarklet.js` | Terser-based bookmarklet minifier |
 
-### 12.4 Configuration (human-authored)
+### 13.4 Configuration (human-authored)
 
 | File | Purpose |
 |------|---------|
@@ -874,7 +954,7 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 | `config/Writing_Style_Guide.md` | Writing style reference (informational) |
 | `config/authenticity-SKILL.md` | Authenticity skill definition (informational) |
 
-### 12.5 Data files
+### 13.5 Data files
 
 | File | Purpose | Created by |
 |------|---------|------------|
@@ -883,5 +963,6 @@ Source file 2026-05-28-Company-Title.md not found for Company — Title — clea
 | `resumes/YYYY-MM-DD/Company - Title/resume.md` | Tailored resume | `generate.js` |
 | `resumes/YYYY-MM-DD/Company - Title/cover_letter.md` | Tailored cover letter | `generate.js` |
 | `resumes/YYYY-MM-DD/Company - Title/submission_record.md` | Application metadata | `generate.js` |
+| `resumes/YYYY-MM-DD/Company - Title/forensic_audit.md` | Forensic audit report | `review.js` |
 | `archive/YYYY-MM-DD/*.md` | Archived job files | `cleanup.js` |
 | `applications.json` | Application history (permanent) | `generate.js` |

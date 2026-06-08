@@ -318,6 +318,30 @@ async function writeDocFile(filePath, content) {
   await fs.writeFile(filePath, content, 'utf-8');
 }
 
+/**
+ * Write a forensic_audit.md file into a job's existing output directory.
+ *
+ * The directory is expected to already exist (created by generate.js's
+ * writeApplicationDocs). This method simply writes the audit report file
+ * inside it.
+ *
+ * @param {string} resumesDir - Path to the resumes directory.
+ * @param {string} dateStr - Date string in "YYYY-MM-DD" format.
+ * @param {string} company - Company name (raw — will be sanitized).
+ * @param {string} title - Job title (raw — will be sanitized).
+ * @param {string} content - Markdown audit report content.
+ * @returns {Promise<string>} The full path written.
+ */
+async function writeForensicAudit(resumesDir, dateStr, company, title, content) {
+  const safeCompany = sanitizeForFilename(company, 60);
+  const safeTitle = sanitizeForFilename(title, 60);
+  const folderName = `${safeCompany} - ${safeTitle}`;
+  const targetDir = path.join(resumesDir, dateStr, folderName);
+  const fullPath = path.join(targetDir, 'forensic_audit.md');
+  await fs.writeFile(fullPath, content, 'utf-8');
+  return fullPath;
+}
+
 module.exports = {
   readJobFiles,
   writeJobFile,
@@ -333,4 +357,5 @@ module.exports = {
   writeQaReport,
   readDocFile,
   writeDocFile,
+  writeForensicAudit,
 };

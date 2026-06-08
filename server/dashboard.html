@@ -646,6 +646,14 @@
     background: #ffb74d;
   }
 
+  .pipeline-btn.run-review {
+    background: #7c4dff;
+    color: #fff;
+  }
+  .pipeline-btn.run-review:hover:not(:disabled) {
+    background: #b388ff;
+  }
+
   .pipeline-btn.cleanup-btn {
     background: #4a5568;
     color: #fff;
@@ -933,6 +941,10 @@
           <span class="spinner"></span>
           &#9654; Run Forensic Auditor
         </button>
+        <button id="pipeline-btn-review" type="button" class="pipeline-btn run-review">
+          <span class="spinner"></span>
+          &#9654; Create Reviews for Resumes
+        </button>
         <button id="pipeline-btn-cleanup" type="button" class="pipeline-btn cleanup-btn">
           <span class="spinner"></span>
           &#9654; Run Cleanup Archiver
@@ -1048,6 +1060,7 @@ function updateHeader(phase, dateStr) {
   var label = 'Pipeline Dashboard';
   if (phase === 'scoring')    label = '\u{1F3AF} Scoring Jobs...';
   if (phase === 'generating') label = '\u2699\uFE0F Generating Documents...';
+  if (phase === 'reviewing')  label = '\u{1F50D} Reviewing Documents...';
   if (phase === 'idle')       label = 'Pipeline Dashboard';
   if (phase === 'harvesting') label = '\u{1F33D} Harvesting...';
 
@@ -1469,6 +1482,9 @@ function logClassForType(type) {
     case 'doc_generated':
     case 'generation_started':
     case 'generation_complete':return 'log-generated';
+    case 'review_started':
+    case 'job_reviewed':
+    case 'review_complete':    return 'log-info';
     case 'job_skipped':
     case 'doc_skipped':        return 'log-warn';
     case 'error':              return 'log-error';
@@ -1505,6 +1521,13 @@ function eventSummary(event) {
       return 'Generation complete \u2014 ' + (d.generated || 0) + ' packages';
     case 'job_harvested':
       return 'Harvested: ' + escapeHtml(d.company || '') + ' \u2014 ' + escapeHtml(d.title || '');
+    case 'review_started':
+      return 'Review started \u2014 ' + (d.total || 0) + ' jobs';
+    case 'job_reviewed':
+      var kwNote = d.keywordCount !== null && d.keywordCount !== undefined ? ' (' + d.keywordCount + ' keywords)' : '';
+      return 'Reviewed: ' + escapeHtml(d.company || '') + ' \u2014 ' + escapeHtml(d.title || '') + kwNote;
+    case 'review_complete':
+      return 'Review complete \u2014 ' + (d.reviewed || 0) + ' jobs audited';
     default:
       return event.type + (d.company ? ': ' + escapeHtml(d.company) : '');
   }
@@ -1684,6 +1707,20 @@ function handleEvent(event) {
       break;
 
     case 'generation_complete':
+      updateHeader('idle');
+      addLogEntry(event);
+      break;
+
+    case 'review_started':
+      updateHeader('reviewing', data.date || null);
+      addLogEntry(event);
+      break;
+
+    case 'job_reviewed':
+      addLogEntry(event);
+      break;
+
+    case 'review_complete':
       updateHeader('idle');
       addLogEntry(event);
       break;
@@ -2016,6 +2053,7 @@ var PIPELINE_TASKS = {
   score:    { btnId: 'pipeline-btn-score',    label: 'Score Engine' },
   generate: { btnId: 'pipeline-btn-generate', label: 'Generation Engine' },
   qa:       { btnId: 'pipeline-btn-qa',       label: 'Forensic Auditor' },
+  review:   { btnId: 'pipeline-btn-review',   label: 'Review Engine' },
   cleanup:  { btnId: 'pipeline-btn-cleanup',  label: 'Cleanup Archiver' },
 };
 
@@ -2262,6 +2300,14 @@ function wirePipelineControls() {
   if (qaBtn) {
     qaBtn.addEventListener('click', function() {
       startPipelineTask('qa');
+    });
+  }
+
+  // Review Engine button
+  var reviewBtn = document.getElementById('pipeline-btn-review');
+  if (reviewBtn) {
+    reviewBtn.addEventListener('click', function() {
+      startPipelineTask('review');
     });
   }
 

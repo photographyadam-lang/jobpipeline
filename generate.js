@@ -323,7 +323,20 @@ function stripCareerForLlm(careerContents) {
     try {
       llmTailoredCore = await callDeepSeek(
         resumeSystemPrompt,
-        buildResumePrompt(strippedCareer, pillarContents, scoredJob, 'OUTPUT ONLY the ## PROFESSIONAL EXPERIENCE and ## INDEPENDENT PROJECTS sections in clean markdown. Omit any header, contact block, footer, EDUCATION, CERTIFICATIONS, PUBLICATIONS, or formatting explanations.'),
+        buildResumePrompt(strippedCareer, pillarContents, scoredJob, [
+          'OUTPUT ONLY the ## PROFESSIONAL EXPERIENCE and ## INDEPENDENT PROJECTS sections',
+          '  in clean markdown. Omit any header, contact block, footer, EDUCATION,',
+          '  CERTIFICATIONS, PUBLICATIONS, or formatting explanations.',
+          '',
+          'KEYWORD INTEGRATION LICENSE:',
+          'The bolded text sequence representing a specific metric or achievement outcome',
+          '  must remain 100% identical to the source text inside your writing pillars',
+          '  library. However, you are explicitly REQUIRED and AUTHORIZED to naturally',
+          '  weave the target job description\'s critical technical keywords and regulatory',
+          '  frameworks into the trailing non-bold mechanism sentences, provided it',
+          '  preserves absolute historical accuracy and never invents false professional',
+          '  experiences.',
+        ].join('\n')),
         { maxTokens: 2000, timeoutMs: 60000 }
       );
     } catch (err) {

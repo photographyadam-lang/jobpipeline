@@ -84,7 +84,8 @@ jobs-pipeline/
 │   │   ├── fileStore.js              # All filesystem I/O (fs.promises only)
 │   │   ├── logger.js                 # Centralized terminal logging
 │   │   ├── promptBuilder.js          # Pure functions for prompt assembly
-│   │   └── ranker.js                 # Dense ranking + action flag assignment
+│   │   ├── ranker.js                 # Dense ranking + action flag assignment
+│   │   └── reviewUtils.js            # Keyword normalization + frequency counting
 │   └── models/
 │       ├── applicationRecord.js      # ApplicationRecord type + helpers
 │       ├── job.js                    # JobFile type + parse/format/sanitize
@@ -101,6 +102,7 @@ jobs-pipeline/
 ├── score.js                          # Scoring orchestrator (CLI entry point)
 ├── generate.js                       # Generation orchestrator (CLI entry point)
 ├── cleanup.js                        # Archive orchestrator (CLI entry point)
+├── review.js                         # Forensic audit review orchestrator (CLI entry point)
 │
 ├── package.json                      # CommonJS, scripts for all operations
 ├── jest.config.js                    # Jest config with per-file coverage thresholds
@@ -123,7 +125,7 @@ jobs-pipeline/
 | `archive/` | `cleanup.js` | Archived job files (dated subdirectories) |
 | `resumes/` | `score.js` | Stack rank files per date |
 | `resumes/YYYY-MM-DD/` | `generate.js` | Generated resumes, cover letters, submission records |
-| `resumes/YYYY-MM-DD/Company - Title/` | `generate.js` | Per-job output directory |
+| `resumes/YYYY-MM-DD/Company - Title/` | `generate.js` | Per-job output directory (resume.md, cover_letter.md, submission_record.md, forensic_audit.md) |
 
 ---
 
@@ -147,7 +149,7 @@ The project follows a strict separation between **pure logic** and **side effect
                        │called by
 ┌──────────────────────▼──────────────────────────────┐
 │              Orchestrators (wiring only)              │
-│  (score.js, generate.js, cleanup.js)                  │
+│  (score.js, generate.js, cleanup.js, review.js)        │
 │                                                       │
 │  • Parse CLI flags (util.parseArgs)                   │
 │  • Call pure functions from src/                      │
@@ -182,7 +184,7 @@ Every side effect has exactly **one** module that owns it:
 
 ### 3.3 Orchestrators Are Wiring Only
 
-Orchestrators (`score.js`, `generate.js`, `cleanup.js`) contain:
+Orchestrators (`score.js`, `generate.js`, `cleanup.js`, `review.js`) contain:
 - `require('dotenv').config()` as the **literal first line**
 - `const { parseArgs } = require('util');` for CLI flag parsing
 - Sequential calls to pure functions + side-effect modules
@@ -252,6 +254,11 @@ All functions use `fs.promises` exclusively. No sync calls.
 | `readApplications(rootDir)` | Reads `applications.json` (returns `[]` if missing) |
 | `writeApplications(rootDir, records)` | Writes `applications.json` |
 | `archiveJobFiles(jobsDir, archiveDir, dateStr)` | Moves job files to `archive/YYYY-MM-DD/` |
+| `readDateDir(resumesDir, dateStr)` | Lists application doc files under `resumes/YYYY-MM-DD/` for QA/review |
+| `writeQaReport(resumesDir, dateStr, content)` | Writes `qa_report.md` to a dated output directory |
+| `readDocFile(filePath)` | Reads a single application document file from disk |
+| `writeDocFile(filePath, content)` | Overwrites a single application document file |
+| `writeForensicAudit(resumesDir, dateStr, company, title, content)` | Writes `forensic_audit.md` into a job's existing output directory |
 
 **I/O optimization (mandatory):**
 - `applications.json` is read **once** before the generate loop, written **once** after
@@ -292,12 +299,16 @@ See [Section 10 — Ranking Algorithm](#10-ranking-algorithm).
 
 | Function | Returns | Labels in prompt |
 |----------|---------|-----------------|
-| `buildScoringPrompt(careerContents, jobFile)` | `[systemPrompt, userPrompt]` | `CANDIDATE PROFILE`, `JOB DESCRIPTION` |
-| `buildResumePrompt(careerContents, pillarContents, scoredJob)` | `[systemPrompt, userPrompt]` | `CANDIDATE PROFILE`, `WRITING STYLE PILLARS`, `JOB TO TARGET` |
-| `buildCoverLetterPrompt(careerContents, scoredJob, resumeContent)` | `[systemPrompt, userPrompt]` | `CANDIDATE PROFILE`, `JOB TO TARGET`, `GENERATED RESUME` |
-| `buildQualityPrompt(scoredJob, resumeContent, coverLetterContent)` | `[systemPrompt, userPrompt]` | `JOB DESCRIPTION`, `GENERATED RESUME`, `GENERATED COVER LETTER` |
+| `buildScoringPrompt(careerContents, jobFile)` | `userPrompt` (string) | `CANDIDATE PROFILE`, `JOB DESCRIPTION` |
+| `buildResumePrompt(careerContents, pillarContents, scoredJob, outputInstruction?)` | `userPrompt` (string) | `CAREER HISTORY`, `PILLAR LIBRARY`, `JOB DESCRIPTION`, `FIT SIGNAL`, `GAP` |
+| `buildCoverLetterPrompt(careerContents, scoredJob, resumeContent)` | `userPrompt` (string) | `CAREER HISTORY`, `JOB DESCRIPTION`, `GENERATED RESUME` |
+| `buildQualityPrompt(scoredJob, resumeContent, coverLetterContent)` | `userPrompt` (string) | `JOB DESCRIPTION`, `GENERATED RESUME`, `GENERATED COVER LETTER` |
 
-All functions validate inputs and throw descriptive errors if required fields are missing. Note that `buildScoringPrompt` is a special case — it returns only a `userPrompt` string (not a tuple), because the scoring system prompt is passed separately as the first argument to `callDeepSeek()`.
+All functions validate inputs and throw descriptive errors if required fields are missing. All prompt builders return only a `userPrompt` string (not a tuple) — the system prompt is loaded separately from a `config/*.md` file and passed as the first argument to `callDeepSeek()`.
+
+**`buildScoringPrompt`** is unique in that it receives `careerContents` and `jobFile` only (no pillar library). The scoring system prompt is loaded separately.
+
+**`buildResumePrompt`** accepts an optional 4th parameter `outputInstruction` — an additional formatting directive appended to the user prompt (used by `generate.js` to instruct the LLM to output only the `## PROFESSIONAL EXPERIENCE` and `## INDEPENDENT PROJECTS` sections, supporting the Hybrid Assembly Pattern).
 
 ### 4.10 `src/qa.js` — Quality Assurance Script
 
@@ -309,6 +320,23 @@ async function main() // run via: npm run qa
 - Evaluates output quality using `config/qa_prompt.md`
 - Produces a QA report with scores and improvement suggestions
 - Broadcasts `qa_complete` event if the server is running
+
+### 4.11 `src/lib/reviewUtils.js` — Keyword Normalization & Frequency Counting
+
+```javascript
+function normalizeKeyword(str)                        // Normalize a keyword: lowercase, strip punctuation, normalize plurals
+function normalizeContent(content)                    // Word-by-word normalization of full content string
+function countKeywordFrequencies(keywords, content)   // Count keyword occurrences, sorted by frequency descending
+```
+
+**Key behaviors:**
+- `normalizeKeyword()` applies a multi-step normalization pipeline: lowercase → strip leading/trailing punctuation → strip possessive `'s` → normalize pluralization markers.
+- **Pluralization normalization:** `ies`→`y` (e.g., `policies`→`policy`), `es`→`""` (e.g., `frameworks`→`framework`), trailing `s`→`""` (e.g., `tools`→`tool`).
+- **Over-stripping guardrail:** A `NATIVE_S_TERMS` set protects domain-critical terms that end naturally in `s` (e.g., `business`, `process`, `access`, `analysis`, `status`, `focus`) from being clipped to incorrect roots.
+- `normalizeContent()` splits on word boundaries, normalizes each token via `normalizeKeyword()`, then rejoins — ensuring pluralization normalization applies to every word in the content.
+- `countKeywordFrequencies()` normalizes both keywords and content, then uses word-boundary-aware regex (`\b`) for exact substring matching, avoiding false partial matches. Results are sorted by count descending.
+- All functions are **pure** — no I/O, no network, no console.
+- Extracted from `review.js` during the keyword-weaving refactor (P6-T02) to enable unit testing and reuse by other orchestrators.
 
 ---
 
@@ -346,11 +374,14 @@ Key behaviors:
 ```javascript
 {
   // All JobFile fields, plus:
-  score:       number,         // 1-10 integer
-  fitSignal:   string,         // "STRONG_FIT" | "MODERATE_FIT" | "WEAK_FIT" | "POOR_FIT"
-  gap:         string,         // Description of skill/experience gaps
-  rank:        number | null,  // Assigned by ranker.js (null until ranked)
-  actionFlag:  string | null,  // Assigned by ranker.js (null until ranked)
+  score:            number,         // 1-10 integer
+  fitSignal:        string,         // "STRONG_FIT" | "MODERATE_FIT" | "WEAK_FIT" | "POOR_FIT"
+  gap:              string,         // Description of skill/experience gaps
+  mustHaves:        string,         // Key requirements the candidate meets (or em-dash)
+  targetArchetype:  string,         // Role archetype identified (or em-dash)
+  matchedPillars:   string[],       // Pillar library sections matched (or [])
+  rank:             number | null,  // Assigned by ranker.js (null until ranked)
+  actionFlag:       string | null,  // Assigned by ranker.js (null until ranked)
 }
 ```
 
@@ -361,7 +392,8 @@ Validation on score response:
 - Must have `score` (integer, 1-10)
 - Must have `fitSignal` (non-empty string)
 - Must have `gap` (non-empty string)
-- Throws `DeepSeekResponseError` on any validation failure
+- **Optional fields** (`must_haves`, `target_archetype`, `matched_pillars`) are not validated strictly — if missing or invalid, they default to em-dash / empty array with a process warning
+- Throws `DeepSeekResponseError` on any validation failure of required fields
 
 `createScoredJob(job, scoreResult)` merges a JobFile with a score result to produce a ScoredJob.
 
@@ -430,15 +462,15 @@ Status updates are performed via the dashboard's `POST /api/applications/apply` 
 ### 6.1 Phase Overview
 
 ```
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│ HARVEST   │    │ SCORE    │    │ GENERATE  │    │ CLEANUP  │
-│           │    │          │    │           │    │          │
-│ Bookmark- │───►│ score.js │───►│generate.js│───►│cleanup.js│
-│ let /     │    │          │    │           │    │          │
-│ Manual AI │    │ DeepSeek │    │ DeepSeek  │    │ Archive  │
-│ Ingestion │    │ Scoring  │    │ Resume +  │    │ Job Files│
-│           │    │ + Rank   │    │ Cover Let │    │          │
-└──────────┘    └──────────┘    └──────────┘    └──────────┘
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+│ HARVEST   │    │ SCORE    │    │ GENERATE  │    │ REVIEW   │    │ CLEANUP  │
+│           │    │          │    │           │    │          │    │          │
+│ Bookmark- │───►│ score.js │───►│generate.js│───►│review.js │───►│cleanup.js│
+│ let /     │    │          │    │           │    │          │    │          │
+│ Manual AI │    │ DeepSeek │    │ DeepSeek  │    │ Forensic │    │ Archive  │
+│ Ingestion │    │ Scoring  │    │ Resume +  │    │ Audit    │    │ Job Files│
+│           │    │ + Rank   │    │ Cover Let │    │          │    │          │
+└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
 ```
 
 ### 6.2 Harvest Phase
@@ -491,27 +523,37 @@ The server maintains an **in-memory URL cache** to prevent duplicate harvests (r
                                             adam_buteux_career.md, pillar_library.md,
                                             quality_prompt.md
 4. Read config contents                   ← all 5 config files read via fileStore.readConfig()
-5. Read stack rank                        ← fileStore.readStackRank()
-6. Parse stack rank (DEEP_TAILOR + AUTO_GENERATED only)
-7. Read applications.json ONCE            ← before loop
-8. Read job files ONCE into Map           ← before loop (keyed by filename)
-9. FOR each qualifying job (sequential):  ← NO Promise.all
-   a. Lookup source in jobFileMap
-   b. Parse job file                      ← parseJobFile()
-   c. Extract fit/gap from stack rank MD  ← extractFitGap() — regex on raw markdown
-   d. Check output dir exists (skip if)   ← idempotency
-   e. Build resume prompt → callDeepSeek  ← maxTokens: 2000, timeout: 60s
-   f. Build cover letter prompt → DeepSeek ← maxTokens: 800, timeout: 60s
-   g. On cover letter failure:            ← set coverLetterContent to null, continue
-   h. Build quality prompt → callDeepSeek ← maxTokens: 200, timeout: 30s
-   i. On quality failure:                 ← set quality fields to null, continue
-   j. Write resume + cover letter files   ← fileStore.writeApplicationDocs()
-   k. Write submission record             ← formatSubmissionRecord() + writeSubmissionRecord()
-   l. Accumulate ApplicationRecord        ← in-memory array
-   m. Broadcast doc_generated             ← SSE with sourceFilename and quality scores
-   n. Log progress with ETA
-10. Write applications.json ONCE          ← after loop, append new records
-11. Broadcast generation_complete
+5. Strip static sections from career      ← stripCareerForLlm() — removes contact header,
+                                            Education, Certifications, Publications
+6. Read stack rank                        ← fileStore.readStackRank()
+7. Parse stack rank (DEEP_TAILOR + AUTO_GENERATED only)
+8. Read applications.json ONCE            ← before loop
+9. Read job files ONCE into Map           ← before loop (keyed by filename)
+10. FOR each qualifying job (sequential): ← NO Promise.all
+    a. Lookup source in jobFileMap
+    b. Parse job file                      ← parseJobFile()
+    c. Extract fit/gap from stack rank MD  ← extractFitGap() — regex on raw markdown
+    d. Build ScoredJob-like object         ← buildScoredJobLike()
+    e. Check output dir exists (skip if)   ← idempotency
+    f. Call 1 — Resume generation          ← Hybrid Assembly Pattern:
+       - Static header (hardcoded)         ← STATIC_RESUME_HEADER invariant
+       - LLM tailored core                 ← callDeepSeek(maxTokens: 2000, timeout: 60s)
+                                            with outputInstruction to emit only
+                                            Professional Exp + Independent Projects
+       - Static footer (hardcoded)         ← STATIC_RESUME_FOOTER invariant
+       - Stitch final resume               ← header + LLM core + footer
+    g. Call 2 — Cover letter generation    ← callDeepSeek(maxTokens: 800, timeout: 60s)
+    h. On cover letter failure:            ← set coverLetterContent to null, continue
+    i. Call 3 — Quality assessment         ← callDeepSeek(maxTokens: 200, timeout: 30s)
+    j. On quality failure:                 ← set quality fields to null, continue
+    k. Write resume + cover letter files   ← fileStore.writeApplicationDocs()
+    l. Write submission record             ← formatSubmissionRecord() + writeSubmissionRecord()
+    m. Accumulate ApplicationRecord        ← in-memory array
+    n. Broadcast doc_generated             ← SSE with sourceFilename and quality scores
+    o. Low-quality warning (R★/CL★ < 6)   ← logger.warn
+    p. Log progress with ETA
+11. Write applications.json ONCE          ← after loop, append new records
+12. Broadcast generation_complete
 ```
 
 **Key details:**
@@ -519,6 +561,8 @@ The server maintains an **in-memory URL cache** to prevent duplicate harvests (r
 - Cover letter failures are tolerated — generation continues with `coverLetterContent = null`
 - Quality assessment failures are tolerated — all quality fields set to `null`
 - The `jobFileMap` is constructed as: `new Map(allJobFiles.map(f => [f.filename, f.content]))`
+- **Hybrid Assembly Pattern:** The resume is assembled from three parts — a hardcoded static header (`STATIC_RESUME_HEADER`), an LLM-tailored core (Professional Experience + Independent Projects), and a hardcoded static footer (`STATIC_RESUME_FOOTER` with Education, Certifications, Publications). The LLM only generates the middle section, never touching static boilerplate.
+- **Career stripping:** `stripCareerForLlm()` removes the contact header and all content from `## Education` onward before sending to the LLM, saving tokens and preventing the LLM from rewriting static credentials.
 
 ### 6.5 Cleanup Phase (`cleanup.js`)
 
@@ -541,6 +585,52 @@ A separate evaluation step that:
 - Evaluates each generated document for quality and completeness
 - Produces a QA assessment via DeepSeek
 - Broadcasts `qa_complete` SSE event
+
+### 6.7 Review Phase — Forensic Audit (`review.js`)
+
+```powershell
+npm run review
+```
+
+A forensic audit step that runs **after** document generation to evaluate application package quality before submission:
+
+```
+1. require('dotenv').config()             ← must be first line
+2. parseArgs({ --date })
+3. Read stack rank                        ← fileStore.readStackRank()
+4. Parse qualifying jobs                  ← parseStackRank() (DEEP_TAILOR + AUTO_GENERATED only)
+5. Read job files ONCE into Map           ← before loop (keyed by filename)
+6. Broadcast review_started               ← SSE event
+7. FOR each qualifying job (sequential):  ← NO Promise.all
+   a. Lookup source in jobFileMap
+   b. Parse job file                      ← parseJobFile()
+   c. Read generated docs                 ← fs.readFile(resume.md, cover_letter.md)
+   d. Call 1 — Forensic Audit Narrative   ← callDeepSeek(maxTokens: 1500, timeout: 60s)
+      - System prompt: inline FORENSIC_AUDIT_SYSTEM_PROMPT (elite recruiter persona)
+      - User prompt: job description, stack rank metadata, resume, cover letter
+      - Output: markdown with sections "## Identity Projection" and
+        "## Filler & Over-Qualification Analysis"
+   e. Call 2 — Keyword Extraction         ← callDeepSeek(maxTokens: 500, timeout: 30s)
+      - System prompt: inline KEYWORD_EXTRACTION_SYSTEM_PROMPT
+      - User prompt: job description only
+      - Output: raw JSON array of 10 keyword strings
+   f. Parse keyword JSON                  ← stripCodeFences() + JSON.parse()
+   g. Programmatic keyword freq count     ← countKeywordFrequencies() (case-insensitive regex)
+   h. Format and write forensic_audit.md  ← formatForensicAudit() + fileStore.writeForensicAudit()
+   i. Broadcast job_reviewed              ← SSE with sourceFilename
+   j. Log progress with ETA
+   k. On error: broadcast job_skipped     ← continue to next job
+8. Broadcast review_complete
+```
+
+**Key details:**
+- **Two LLM calls per job** — Forensic Audit Narrative and Keyword Extraction — both sequential
+- The audit uses inline system prompts (not from `config/` files), as the review logic is self-contained in [`review.js`](review.js)
+- `stripCodeFences()` handles DeepSeek wrapping JSON in ```json``` fences despite explicit instructions not to
+- `countKeywordFrequencies()` performs case-insensitive regex matching of extracted keywords against the resume content, producing a sorted frequency table
+- Failure on either LLM call (audit or keyword extraction) **skips that job** — the pipeline continues with the next one
+- Output: `forensic_audit.md` written into the job's existing output directory alongside `resume.md` and `cover_letter.md`
+- The audit report contains an LLM-generated narrative analysis plus a programmatic keyword frequency table
 
 ---
 
@@ -590,7 +680,7 @@ const state = {
 
 State is rebuilt on startup:
 - URL cache (`harvestedUrls: Set<string>`) populated by reading existing job files and parsing URLs
-- Application history from `applications.json` (last 10 entries)
+- Application history from `applications.json` — deduplicated via `deduplicateApplications()` (ID-keyed Map, preserves "applied" status over "generated" on collision)
 - Pipeline process tracking via `currentProcess: ChildProcess | null`
 - Pipeline log SSE clients via `pipelineClients: Response[]`
 
@@ -628,11 +718,18 @@ State is rebuilt on startup:
 
 The server can spawn pipeline scripts directly via the dashboard's "Run" buttons:
 
-- `POST /api/pipeline/run` accepts `{ task: 'score' | 'generate' | 'qa' }`
+- `POST /api/pipeline/run` accepts `{ task: 'score' | 'generate' | 'qa' | 'cleanup' | 'review' }`
 - Spawns `npm run {task}` as a child process with `shell: true`
 - Only one process may run at a time — returns `409` if a process is already running
 - stdout/stderr are forwarded to all connected pipeline log SSE clients
 - On process exit, an `{ type: 'exit', code }` event is broadcast
+
+**Post-exit side effects:**
+| Task | On success (code 0) |
+|------|-------------------|
+| `generate` | Re-hydrates `state.applicationHistory` from disk — broadcasts updated state with new application records |
+| `cleanup` | Resets in-memory `scored`, `generated`, and `date` state — broadcasts fresh state snapshot so dashboard clears stale data |
+| `review` | Sets `state.phase = 'idle'` — broadcasts state snapshot |
 
 ---
 
@@ -645,18 +742,21 @@ The server can spawn pipeline scripts directly via the dashboard's "Run" buttons
 | `job_harvested` | Server (harvest endpoint) | `company, title, filename, url` |
 | `scoring_started` | `score.js` | `total, date` |
 | `job_scored` | `score.js` (per job) | `rank, score, company, title, actionFlag, fitSignal, gap, sourceFilename, salary, location, url, linkedInJobId` |
-| `job_skipped` | `score.js` (on error) | `filename, reason` |
+| `job_skipped` | `score.js` / `generate.js` / `review.js` (on error) | `filename, reason` |
 | `scoring_complete` | `score.js` | `scored, scoreMean, scoreMin, scoreMax, distribution` |
 | `generation_started` | `generate.js` | `total` |
 | `doc_generated` | `generate.js` (per job) | `company, title, sourceFilename, resumeQuality, coverLetterQuality, qualityNote, pillarsSelected, coverLetterParas` |
 | `doc_skipped` | `generate.js` (on error) | `filename, reason` |
 | `generation_complete` | `generate.js` | `generated` |
+| `review_started` | `review.js` | `total, date` |
+| `job_reviewed` | `review.js` (per job) | `company, title, sourceFilename, keywordCount` |
+| `review_complete` | `review.js` | `reviewed` |
 | `qa_complete` | `src/qa.js` | Assessment results |
 
 ### 8.2 Event Flow
 
 ```
-Pipeline (score.js/generate.js/qa.js)     Server                   Dashboard
+Pipeline (score.js/generate.js/review.js/qa.js)  Server                   Dashboard
         │                                   │                        │
         │─── broadcastEvent(type, data) ───►│                        │
         │                                   │─── SSE push ─────────►│
@@ -678,6 +778,9 @@ The pipeline never talks to the dashboard directly. It POSTs to the server's `/e
 | `doc_generated` | Pushes to `state.generated` |
 | `doc_skipped` | No state mutation — broadcast only |
 | `generation_complete` | Sets `state.phase = 'idle'` |
+| `review_started` | Sets `state.phase = 'reviewing'` |
+| `job_reviewed` | No state mutation — broadcast only |
+| `review_complete` | Sets `state.phase = 'idle'` |
 | `job_harvested` | Pushes to `state.harvested` |
 
 ### 8.4 `sourceFilename` Constraint
@@ -756,7 +859,9 @@ In the stack rank markdown, action flags are displayed with emoji prefixes:
 
 ## 11. LLM Integration
 
-The pipeline uses the DeepSeek API (`deepseek-chat` model) for four distinct LLM call types. Each call type has a dedicated system prompt stored in `config/`, a pure-function prompt assembler in [`src/lib/promptBuilder.js`](src/lib/promptBuilder.js), and a response parser in the relevant model module. All calls are routed through a single API adapter in [`src/lib/deepseek.js`](src/lib/deepseek.js).
+The pipeline uses the DeepSeek API (`deepseek-chat` model) for five distinct LLM call types. Each call type has a dedicated system prompt (either stored in `config/` or defined inline), a pure-function prompt assembler in [`src/lib/promptBuilder.js`](src/lib/promptBuilder.js) (for the main four types), and a response parser in the relevant model module. All calls are routed through a single API adapter in [`src/lib/deepseek.js`](src/lib/deepseek.js).
+
+**`PIPELINE_BASE_DIR` env var:** All orchestrators (`score.js`, `generate.js`, `review.js`) support the `PIPELINE_BASE_DIR` environment variable to override the project root directory. This is used by E2E tests to point at a temporary directory. Defaults to `__dirname` (project root) for normal usage.
 
 ### 11.1 Architecture Overview
 
@@ -764,7 +869,7 @@ The pipeline uses the DeepSeek API (`deepseek-chat` model) for four distinct LLM
 LLM Call Architecture
 
 Orchestrator
-(score.js / generate.js)
+(score.js / generate.js / review.js)
   |
   +-- 1. Load system prompt from config/ (fileStore.readConfig)
   +-- 2. Load career/pillar data from config/
@@ -838,15 +943,16 @@ The **system prompt** is loaded separately by the orchestrator from a `config/*.
 | User prompt labels | `CANDIDATE PROFILE`, `JOB DESCRIPTION` |
 | `maxTokens` | 1024 |
 | `timeoutMs` | 30000 (default) |
-| Response format | JSON: `{ "score": number, "fitSignal": string, "gap": string }` |
+| Response format | JSON: `{ "score": number, "fit_signal": string, "gap": string, "must_haves": string, "target_archetype": string, "matched_pillars": string[] }` |
 | Response parser | `parseScoreResponse(rawResponse)` in `src/models/scoredJob.js` |
 
 **Parsing and validation:**
 - Must be valid JSON
 - `score` must be an integer 1-10
-- `fitSignal` must be a non-empty string (validated as `STRONG_FIT` / `MODERATE_FIT` / `WEAK_FIT` / `POOR_FIT`)
+- `fit_signal` must be a non-empty string (validated as `STRONG_FIT` / `MODERATE_FIT` / `WEAK_FIT` / `POOR_FIT`)
 - `gap` must be a non-empty string
-- On failure: throws `DeepSeekResponseError` — the orchestrator skips the job and broadcasts `job_skipped`
+- **Optional fields** (`must_haves`, `target_archetype`, `matched_pillars`) default to em-dash / empty array if missing or invalid — a process warning is emitted but no error is thrown
+- On failure of required fields: throws `DeepSeekResponseError` — the orchestrator skips the job and broadcasts `job_skipped`
 
 **Note:** `buildScoringPrompt` is unique among the builders — it returns only a user prompt string (not a tuple), because the scoring system prompt is passed separately as the first argument to `callDeepSeek()`.
 
@@ -898,6 +1004,41 @@ The optional `outputInstruction` parameter appends additional formatting instruc
 
 **Failure tolerance:** If this call fails or returns unparseable JSON, all quality fields (`resumeQuality`, `coverLetterQuality`, `qualityNote`, `pillarsSelected`, `coverLetterParas`) are set to `null`. Resume and cover letter are still written — generation is **not blocked** by a failed quality assessment.
 
+#### 11.4.5 Forensic Audit & Keyword Extraction Calls
+
+These two calls are performed by `review.js` and are distinct from the generation pipeline. Unlike the other call types, their system prompts are defined **inline** in [`review.js`](review.js) rather than loaded from `config/` files.
+
+**Call A — Forensic Audit Narrative:**
+
+| Property | Value |
+|----------|-------|
+| Purpose | Generate a recruiter-perspective critique of the application package |
+| Used in | `review.js` (per-job loop, Call 1 of 2) |
+| System prompt | Inline `FORENSIC_AUDIT_SYSTEM_PROMPT` — elite recruiter persona |
+| User prompt | `buildAuditUserPrompt()` — aggregates job description, stack rank metadata, resume, cover letter |
+| User prompt labels | `TARGET JOB DESCRIPTION`, `STACK RANK METADATA`, `GENERATED RESUME`, `GENERATED COVER LETTER` |
+| `maxTokens` | 1500 |
+| `timeoutMs` | 60000 (60s) |
+| Response format | Raw markdown with sections `## Identity Projection` and `## Filler & Over-Qualification Analysis` |
+| Response handling | Passed to `formatForensicAudit()` combined with keyword frequency table → `forensic_audit.md` |
+
+**Call B — Keyword Extraction:**
+
+| Property | Value |
+|----------|-------|
+| Purpose | Extract the top 10 most critical keywords from the job description |
+| Used in | `review.js` (per-job loop, Call 2 of 2) |
+| System prompt | Inline `KEYWORD_EXTRACTION_SYSTEM_PROMPT` |
+| User prompt | `buildKeywordUserPrompt()` — job description text only |
+| `maxTokens` | 500 |
+| `timeoutMs` | 30000 (30s) |
+| Response format | Raw JSON array: `["keyword1", "keyword2", ...]` (10 strings) |
+| Response handling | `stripCodeFences()` + `JSON.parse()`; on failure, proceeds with empty keyword table |
+
+**Programmatic keyword frequency counting:** After the Keyword Extraction call, `countKeywordFrequencies()` (from [`src/lib/reviewUtils.js`](src/lib/reviewUtils.js)) performs case-insensitive, word-boundary-aware regex matching against the resume content. Each keyword is normalized via `normalizeKeyword()` — a multi-step pipeline that lowercases, strips punctuation/possessives, and normalizes pluralization (`ies`→`y`, `es`→`""`, trailing `s`→`""`) while respecting an **over-stripping guardrail** that protects domain terms like `business`, `process`, `access`, and `analysis` from being clipped. The content is normalized word-by-word via `normalizeContent()` before matching. Results are sorted by frequency descending and included in the `forensic_audit.md` keyword frequency table.
+
+**Failure tolerance:** Failure on either call **skips that job** — the review pipeline continues with the next job. Unlike generation, cover letter and quality failures in review do not have "graceful degradation" (the audit requires both resume and cover letter to be meaningful).
+
 ### 11.5 Rate Limiting Strategy
 
 All DeepSeek calls are **sequential** — never `Promise.all`. Both orchestrators use simple `for` loops:
@@ -940,6 +1081,7 @@ The pipeline uses a graduated error-tolerance strategy for LLM calls:
 | **2. Response parsing (scoring)** | Invalid JSON, missing fields | Throws `DeepSeekResponseError` — orchestrator logs warning, broadcasts `job_skipped`, continues to next job |
 | **3. Response parsing (generation)** | Cover letter call fails | Sets `coverLetterContent = null` (writes empty string), continues to quality assessment |
 | **4. Response parsing (quality)** | Invalid JSON, missing fields, or call failure | Sets all quality fields to `null`, continues to file writing |
+| **5. Response parsing (review)** | Forensic audit or keyword extraction call fails | Skips that job, broadcasts `job_skipped`, continues to next job |
 
 **Key principle:** A single failed LLM call **never** fails the entire pipeline. Individual jobs may be skipped or have degraded output, but the pipeline always completes.
 
@@ -951,6 +1093,8 @@ The pipeline uses a graduated error-tolerance strategy for LLM calls:
 | Resume | 2000 | 60000 | Raw markdown | Skip job, broadcast `doc_skipped` |
 | Cover letter | 800 | 60000 | Raw markdown | Set to empty string, continue |
 | Quality | 200 | 30000 | JSON (parsed) | Set quality fields to null, continue |
+| Forensic Audit | 1500 | 60000 | Raw markdown | Skip job, broadcast `job_skipped` |
+| Keyword Extraction | 500 | 30000 | JSON array (parsed) | Skip job, broadcast `job_skipped` |
 
 ---
 
@@ -958,12 +1102,13 @@ The pipeline uses a graduated error-tolerance strategy for LLM calls:
 
 ### 12.1 Pattern
 
-All prompt builders follow the same pattern:
+All prompt builders in `src/lib/promptBuilder.js` follow the same pattern:
 
 1. Validate inputs (throw descriptive errors for missing fields)
-2. Read system prompt from config file (the system prompt text) — note that `buildScoringPrompt()` accepts the career contents directly and returns only the user prompt; the system prompt is passed separately to `callDeepSeek()`
-3. Assemble user prompt with labeled sections (e.g. `## CANDIDATE PROFILE`, `## JOB DESCRIPTION`)
-4. Return `[systemPromptString, userPromptString]` or just the user prompt string for scoring
+2. Assemble user prompt with labeled sections (e.g. `CANDIDATE PROFILE:`, `JOB DESCRIPTION:`)
+3. Return only a `userPrompt` string — the system prompt is loaded separately by the orchestrator from a `config/*.md` file and passed as the first argument to `callDeepSeek()`
+
+**Note:** All prompt builders now return only the user prompt string. The system prompt is always loaded and passed separately by the orchestrator.
 
 ### 12.2 Config File Roles
 
@@ -984,8 +1129,11 @@ All prompt builders follow the same pattern:
 ```json
 {
   "score": 8,
-  "fitSignal": "STRONG_FIT",
-  "gap": "Limited experience with healthcare regulations"
+  "fit_signal": "STRONG_FIT",
+  "gap": "Limited experience with healthcare regulations",
+  "must_haves": "CIPP/E, GDPR implementation experience, risk assessment frameworks",
+  "target_archetype": "Privacy Operations Lead",
+  "matched_pillars": ["Subject Matter Expertise", "Strategic Vision"]
 }
 ```
 
@@ -1171,23 +1319,23 @@ Application record IDs are generated as:
                     │  package.json │
                     └───────┬───────┘
                             │
-          ┌─────────────────┼──────────────────┐
-          │                 │                   │
-    ┌─────▼─────┐    ┌─────▼─────┐     ┌───────▼───────┐
-    │  score.js  │    │generate.js│     │  cleanup.js   │
-    └─────┬─────┘    └─────┬─────┘     └───────┬───────┘
-          │                 │                   │
-    ┌─────▼─────────┐ ┌────▼──────────┐  ┌─────▼────────┐
-    │    src/lib/    │ │    src/lib/   │  │   src/lib/   │
-    │  deepseek.js   │ │  deepseek.js  │  │  fileStore.js│
-    │ eventBroadcast │ │ eventBroadcast│  └──────────────┘
-    │  fileStore.js  │ │  fileStore.js │
-    │   logger.js    │ │   logger.js   │
-    └─────┬─────────┘ └────┬──────────┘
-          │                 │
-    ┌─────▼─────────────────▼──────────┐
-    │         src/models/               │
-    │   job.js   scoredJob.js          │
+          ┌─────────────────┼──────────────────┬────────────────┐
+          │                 │                   │                │
+    ┌─────▼─────┐    ┌─────▼─────┐     ┌───────▼───────┐  ┌────▼───────┐
+    │  score.js  │    │generate.js│     │  cleanup.js   │  │ review.js  │
+    └─────┬─────┘    └─────┬─────┘     └───────┬───────┘  └────┬───────┘
+          │                 │                   │               │
+    ┌─────▼─────────┐ ┌────▼──────────┐  ┌─────▼────────┐ ┌───▼───────────┐
+    │    src/lib/    │ │    src/lib/   │  │   src/lib/   │ │   src/lib/    │
+    │  deepseek.js   │ │  deepseek.js  │  │  fileStore.js│ │ deepseek.js   │
+    │ eventBroadcast │ │ eventBroadcast│  └──────────────┘ │ eventBroadcast│
+    │  fileStore.js  │ │  fileStore.js │                   │  fileStore.js │
+    │   logger.js    │ │   logger.js   │                   │   logger.js   │
+    └─────┬─────────┘ └────┬──────────┘                   └──────┬────────┘
+          │                 │                                    │
+    ┌─────▼─────────────────▼──────────┐                         │
+    │         src/models/               │                         │
+    │   job.js   scoredJob.js          │◄────────────────────────┘
     │ stackRank.js applicationRecord.js│
     └──────────────────────────────────┘
           │                 │
@@ -1195,7 +1343,7 @@ Application record IDs are generated as:
     │         src/lib/                  │
     │  promptBuilder.js  ranker.js     │
     │  deduplicator.js  dateUtils.js   │
-    │  errors.js                       │
+    │  errors.js  reviewUtils.js       │
     └──────────────────────────────────┘
           │                 │
     ┌─────▼─────────────────▼──────────┐
@@ -1211,10 +1359,12 @@ Application record IDs are generated as:
 ### Module dependency rules
 
 - `src/models/*.js` depend on **nothing** except `src/lib/errors.js` (and `src/lib/dateUtils.js` for `stackRank.js`)
-- `src/lib/*.js` depend on models and `src/lib/errors.js` but NOT on each other (except errors)
-- Orchestrators depend on `src/lib/*.js` and `src/models/*.js`
+- `src/lib/*.js` depend on models and `src/lib/errors.js` but NOT on each other (except errors). `src/lib/reviewUtils.js` is standalone (depends on nothing except standard library).
+- Orchestrators (`score.js`, `generate.js`, `cleanup.js`, `review.js`) depend on `src/lib/*.js` and `src/models/*.js`
+- `review.js` also depends on `src/lib/reviewUtils.js` for keyword frequency counting
 - `server/server.js` depends on `src/lib/logger.js`, `src/lib/fileStore.js`, `src/lib/deepseek.js`, and `src/lib/dateUtils.js`
 - `src/qa.js` depends on `src/lib/` modules and models
+- `review.js` reads generated docs directly via `fs.promises.readFile()` (outside of `fileStore.js`) — this is the exception to rule 3, as fileStore.js does not expose per-doc read methods for the full review workflow
 
 ---
 
@@ -1235,16 +1385,16 @@ Application record IDs are generated as:
 
 ```bash
 # Check for console.log violations
-grep -r "console\." src/ score.js generate.js cleanup.js server/server.js
+grep -r "console\." src/ score.js generate.js cleanup.js review.js server/server.js
 
 # Check for Promise.all on DeepSeek
-grep -n "Promise.all" score.js generate.js
+grep -n "Promise.all" score.js generate.js review.js
 
 # Check for sync file operations
 grep -rn "readFileSync\|writeFileSync" src/
 
 # Check for forbidden packages in imports
-grep -rn "require.*\(axios\|nock\|supertest\|tmp\|minimist\|yargs\)" src/ score.js generate.js cleanup.js server/
+grep -rn "require.*\(axios\|nock\|supertest\|tmp\|minimist\|yargs\)" src/ score.js generate.js cleanup.js review.js server/
 ```
 
 ### Quick test commands
@@ -1255,4 +1405,5 @@ npm test           # All tests — must exit 0, all prior tests green
 npm run test:unit  # Unit tests only
 npm run test:int   # Integration tests only
 npm run test:e2e   # End-to-end tests only
+npm run review     # Forensic audit review (requires generate output)
 ```
