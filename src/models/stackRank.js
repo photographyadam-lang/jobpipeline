@@ -92,11 +92,16 @@ function formatStackRank(rankedJobs, date, fuzzyWarnings, stats) {
 
     lines.push('');
     lines.push(`**Fit:** ${job.fitSignal}`);
-    lines.push(`**Gap:** ${job.gap}`);
+    let gapLine = `**Gap:** ${job.gap}`;
+    if (job.overQualified === true) {
+      gapLine += ' ⚠️ OVER-QUALIFIED';
+    }
+    lines.push(gapLine);
     lines.push(`**Must-Haves:** ${job.mustHaves ?? '—'}`);
     lines.push(`**Target Archetype:** ${job.targetArchetype ?? '—'}`);
     const pillarStr = Array.isArray(job.matchedPillars) ? job.matchedPillars.join(', ') : '—';
     lines.push(`**Pillar Library Matches:** ${pillarStr}`);
+    lines.push(`**Critical Keywords:** ${job.criticalKeywords || '—'}`);
     lines.push('');
     lines.push('---');
   }
@@ -142,12 +147,14 @@ function parseStackRank(markdown) {
     const sourceFileMatch = body.match(/\*\*Source file:\*\* (.+)/);
     const linkedInIdMatch = body.match(/\*\*LinkedIn Job ID:\*\* (.+)/);
     const urlMatch = body.match(/\*\*URL:\*\* (.+)/);
+    const keywordsMatch = body.match(/\*\*Critical Keywords:\*\* (.+)/);
 
     const sourceFilename = sourceFileMatch ? sourceFileMatch[1].trim() : '';
     const linkedInJobId = linkedInIdMatch && linkedInIdMatch[1].trim() !== 'Not available'
       ? linkedInIdMatch[1].trim()
       : null;
     const url = urlMatch ? urlMatch[1].trim() : '';
+    const criticalKeywords = keywordsMatch ? keywordsMatch[1].trim() : '';
 
     entries.push({
       rank,
@@ -158,6 +165,7 @@ function parseStackRank(markdown) {
       url,
       linkedInJobId,
       sourceFilename,
+      criticalKeywords,
     });
   }
 

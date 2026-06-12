@@ -1,6 +1,7 @@
 'use strict';
 
 const { ConfigMissingError, DeepSeekResponseError } = require('./errors.js');
+const logger = require('./logger');
 
 /**
  * Call DeepSeek chat completions API.
@@ -67,6 +68,12 @@ async function callDeepSeek(systemPrompt, userPrompt, options) {
   }
 
   const data = await response.json();
+  const finishReason = data.choices &&
+    data.choices[0] &&
+    data.choices[0].finish_reason;
+  if (finishReason === 'length') {
+    logger.warn('[deepseek]', `Response truncated — finish_reason is "length". The maxTokens limit (${maxTokens}) was hit before the model completed its response. Consider increasing maxTokens.`);
+  }
   const content = data.choices &&
     data.choices[0] &&
     data.choices[0].message &&

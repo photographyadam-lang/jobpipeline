@@ -175,6 +175,28 @@ describe('buildResumePrompt', () => {
   it('throws when gap is missing', () => {
     expect(() => buildResumePrompt(careerContents, pillarContents, makeScoredJob({ gap: undefined }))).toThrow();
   });
+
+  it('includes CRITICAL KEYWORDS section when criticalKeywords is present', () => {
+    const scoredJob = makeScoredJob({ criticalKeywords: 'HIPAA, HITECH, EHR integration' });
+    const result = buildResumePrompt(careerContents, pillarContents, scoredJob);
+
+    expect(result).toContain('CRITICAL KEYWORDS TO WEAVE:');
+    expect(result).toContain('HIPAA, HITECH, EHR integration');
+  });
+
+  it('omits CRITICAL KEYWORDS section when criticalKeywords is empty', () => {
+    const scoredJob = makeScoredJob({ criticalKeywords: '' });
+    const result = buildResumePrompt(careerContents, pillarContents, scoredJob);
+
+    expect(result).not.toContain('CRITICAL KEYWORDS TO WEAVE:');
+  });
+
+  it('omits CRITICAL KEYWORDS section when criticalKeywords is undefined', () => {
+    const scoredJob = makeScoredJob();
+    const result = buildResumePrompt(careerContents, pillarContents, scoredJob);
+
+    expect(result).not.toContain('CRITICAL KEYWORDS TO WEAVE:');
+  });
 });
 
 describe('buildCoverLetterPrompt', () => {
@@ -207,6 +229,28 @@ describe('buildCoverLetterPrompt', () => {
     expect(() => buildCoverLetterPrompt(careerContents, makeScoredJob(), null)).toThrow();
     expect(() => buildCoverLetterPrompt(careerContents, makeScoredJob(), '')).toThrow();
   });
+
+  it('includes CRITICAL KEYWORDS section when criticalKeywords is present', () => {
+    const scoredJob = makeScoredJob({ criticalKeywords: 'HIPAA, HITECH, EHR integration' });
+    const result = buildCoverLetterPrompt(careerContents, scoredJob, resumeContent);
+
+    expect(result).toContain('CRITICAL KEYWORDS TO WEAVE:');
+    expect(result).toContain('HIPAA, HITECH, EHR integration');
+  });
+
+  it('omits CRITICAL KEYWORDS section when criticalKeywords is empty', () => {
+    const scoredJob = makeScoredJob({ criticalKeywords: '' });
+    const result = buildCoverLetterPrompt(careerContents, scoredJob, resumeContent);
+
+    expect(result).not.toContain('CRITICAL KEYWORDS TO WEAVE:');
+  });
+
+  it('omits CRITICAL KEYWORDS section when criticalKeywords is undefined', () => {
+    const scoredJob = makeScoredJob();
+    const result = buildCoverLetterPrompt(careerContents, scoredJob, resumeContent);
+
+    expect(result).not.toContain('CRITICAL KEYWORDS TO WEAVE:');
+  });
 });
 
 describe('buildQualityPrompt', () => {
@@ -238,6 +282,28 @@ describe('buildQualityPrompt', () => {
   it('throws when coverLetterContent is missing', () => {
     expect(() => buildQualityPrompt(makeScoredJob(), resumeContent, null)).toThrow();
     expect(() => buildQualityPrompt(makeScoredJob(), resumeContent, '')).toThrow();
+  });
+
+  it('includes CRITICAL KEYWORDS section when criticalKeywords is present', () => {
+    const scoredJob = makeScoredJob({ criticalKeywords: 'HIPAA, HITECH, EHR integration' });
+    const result = buildQualityPrompt(scoredJob, resumeContent, coverLetterContent);
+
+    expect(result).toContain('CRITICAL KEYWORDS TO WEAVE:');
+    expect(result).toContain('HIPAA, HITECH, EHR integration');
+  });
+
+  it('omits CRITICAL KEYWORDS section when criticalKeywords is empty', () => {
+    const scoredJob = makeScoredJob({ criticalKeywords: '' });
+    const result = buildQualityPrompt(scoredJob, resumeContent, coverLetterContent);
+
+    expect(result).not.toContain('CRITICAL KEYWORDS TO WEAVE:');
+  });
+
+  it('omits CRITICAL KEYWORDS section when criticalKeywords is undefined', () => {
+    const scoredJob = makeScoredJob();
+    const result = buildQualityPrompt(scoredJob, resumeContent, coverLetterContent);
+
+    expect(result).not.toContain('CRITICAL KEYWORDS TO WEAVE:');
   });
 });
 

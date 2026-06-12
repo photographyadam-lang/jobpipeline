@@ -69,6 +69,19 @@ describe('GET /dashboard — dashboard.html serving', () => {
     expect(html).toContain('id="raw-job-url"');
     expect(html).toContain('id="raw-job-text"');
     expect(html).toContain('id="harvest-raw-btn"');
+
+    // Application history filter buttons
+    expect(html).toContain('data-filter="active"');
+    expect(html).toContain('data-filter="all"');
+    expect(html).toContain('data-filter="applied"');
+
+    // Application history sort dropdown
+    expect(html).toContain('id="app-history-sort"');
+    expect(html).toContain('value="default"');
+    expect(html).toContain('value="company"');
+    expect(html).toContain('value="score"');
+    expect(html).toContain('value="dateGenerated"');
+    expect(html).toContain('value="dateApplied"');
   });
 
   // ------------------------------------------------------------------

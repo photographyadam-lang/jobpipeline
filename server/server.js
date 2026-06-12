@@ -568,6 +568,18 @@ function createApp(jobsDir) {
           state.phase = 'idle';
           break;
 
+        case 'optimize_started':
+          state.phase = 'optimizing';
+          break;
+
+        case 'job_optimized':
+          // No persistent state mutation — broadcast only
+          break;
+
+        case 'optimize_complete':
+          state.phase = 'idle';
+          break;
+
         case 'job_harvested':
           if (data) {
             state.harvested.push(data);
@@ -678,7 +690,7 @@ function createApp(jobsDir) {
       const { task } = req.body || {};
 
       // Validate task
-      const VALID_TASKS = ['score', 'generate', 'qa', 'cleanup', 'review'];
+      const VALID_TASKS = ['score', 'generate', 'qa', 'cleanup', 'review', 'optimize'];
       if (!task || !VALID_TASKS.includes(task)) {
         res.status(400).json({ error: `Invalid task. Must be one of: ${VALID_TASKS.join(', ')}` });
         return;
@@ -744,6 +756,13 @@ function createApp(jobsDir) {
           state.phase = 'idle';
           broadcast({ type: 'state', data: state });
           logger.info('[server]', `Review complete — broadcast state snapshot`);
+        }
+
+        // On successful optimize, re-broadcast state so dashboard knows phase is idle
+        if (code === 0 && task === 'optimize') {
+          state.phase = 'idle';
+          broadcast({ type: 'state', data: state });
+          logger.info('[server]', `Optimize complete — broadcast state snapshot`);
         }
 
         // Re-hydrate application history from disk after a successful generate pass

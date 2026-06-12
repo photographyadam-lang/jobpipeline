@@ -1,5 +1,10 @@
 {
   "score": 7,
   "fit_signal": "Strong alignment on governance program leadership and enterprise compliance scope. Meta experience maps directly to the regulatory delivery requirements.",
-  "gap": "No direct healthcare domain experience."
+  "gap": "No direct healthcare domain experience.",
+  "must_haves": "Healthcare privacy domain expertise, program-building at scale, executive stakeholder management",
+  "target_archetype": "A hands-on governance program builder",
+  "matched_pillars": ["Pillar 1", "Pillar 4", "Pillar 8"],
+  "critical_keywords": "HIPAA, HITECH, CMS interoperability, healthcare data masking, EHR integration",
+  "over_qualified": false
 }

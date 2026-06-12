@@ -150,6 +150,8 @@ const REQUIRED_CONFIGS = ['scoring_prompt.md', 'adam_buteux_career.md'];
       actionFlag: null,
       fitSignal: scoredJob.fitSignal,
       gap: scoredJob.gap,
+      criticalKeywords: scoredJob.criticalKeywords,
+      overQualified: scoredJob.overQualified,
       sourceFilename: scoredJob.filename,
       salary: scoredJob.salary,
       location: scoredJob.location,

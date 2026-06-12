@@ -6,7 +6,7 @@ const { DeepSeekResponseError } = require('../lib/errors');
  * Parse a raw DeepSeek scoring response JSON string into a structured object.
  *
  * @param {string} rawResponse - Raw JSON string from DeepSeek.
- * @returns {{ score: number, fitSignal: string, gap: string }}
+ * @returns {{ score: number, fitSignal: string, gap: string, mustHaves: string, targetArchetype: string, matchedPillars: string[], criticalKeywords: string, overQualified: boolean }}
  * @throws {DeepSeekResponseError} On any validation failure.
  */
 function parseScoreResponse(rawResponse) {
@@ -68,6 +68,26 @@ function parseScoreResponse(rawResponse) {
     process.emitWarning('matched_pillars is missing or not an array — defaulting to empty array');
   }
 
+  // 10. critical_keywords — warn + default on failure, never throw
+  let criticalKeywords = '';
+  if (typeof parsed.critical_keywords === 'string' && parsed.critical_keywords.trim() !== '') {
+    criticalKeywords = parsed.critical_keywords;
+  } else {
+    process.emitWarning('critical_keywords is missing or empty — defaulting to empty string');
+  }
+
+  // 11. over_qualified — warn + default on failure, never throw
+  let overQualified = false;
+  if (typeof parsed.over_qualified === 'boolean') {
+    overQualified = parsed.over_qualified;
+  } else if (parsed.over_qualified !== undefined && parsed.over_qualified !== null) {
+    // Coerce truthy/falsy non-boolean values (e.g., "true", 1)
+    overQualified = Boolean(parsed.over_qualified);
+    process.emitWarning(`over_qualified received non-boolean value — coerced to ${overQualified}`);
+  } else {
+    process.emitWarning('over_qualified is missing — defaulting to false');
+  }
+
   return {
     score: parsed.score,
     fitSignal: parsed.fit_signal,
@@ -75,6 +95,8 @@ function parseScoreResponse(rawResponse) {
     mustHaves: mustHaves,
     targetArchetype: targetArchetype,
     matchedPillars: matchedPillars,
+    criticalKeywords: criticalKeywords,
+    overQualified: overQualified,
   };
 }
 
@@ -82,7 +104,7 @@ function parseScoreResponse(rawResponse) {
  * Combine a valid JobFile object with parsed scoring attributes into a ScoredJob.
  *
  * @param {object} job - A valid JobFile object.
- * @param {{ score: number, fitSignal: string, gap: string, mustHaves: string, targetArchetype: string, matchedPillars: string[] }} scoreResult - Parsed score fields.
+ * @param {{ score: number, fitSignal: string, gap: string, mustHaves: string, targetArchetype: string, matchedPillars: string[], criticalKeywords: string, overQualified: boolean }} scoreResult - Parsed score fields.
  * @returns {object} ScoredJob with rank and actionFlag set to null.
  */
 function createScoredJob(job, scoreResult) {

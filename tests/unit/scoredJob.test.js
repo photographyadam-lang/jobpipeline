@@ -51,14 +51,15 @@ describe('parseScoreResponse', () => {
     const fixtureContent = loadFixture('sample_deepseek_score_response.json');
     const result = parseScoreResponse(fixtureContent);
 
-    // Fixture only has score, fit_signal, gap — enrichment fields get defaults
     expect(result).toEqual({
       score: 7,
       fitSignal: 'Strong alignment on governance program leadership and enterprise compliance scope. Meta experience maps directly to the regulatory delivery requirements.',
       gap: 'No direct healthcare domain experience.',
-      mustHaves: '—',
-      targetArchetype: '—',
-      matchedPillars: [],
+      mustHaves: 'Healthcare privacy domain expertise, program-building at scale, executive stakeholder management',
+      targetArchetype: 'A hands-on governance program builder',
+      matchedPillars: ['Pillar 1', 'Pillar 4', 'Pillar 8'],
+      criticalKeywords: 'HIPAA, HITECH, CMS interoperability, healthcare data masking, EHR integration',
+      overQualified: false,
     });
   });
 
@@ -149,6 +150,119 @@ describe('parseScoreResponse', () => {
       parseScoreResponse(payload);
     }).toThrow(DeepSeekResponseError);
   });
+
+  // ── critical_keywords ──────────────────────────────────────────────
+
+  it('parses critical_keywords from fixture response', () => {
+    const payload = JSON.stringify({
+      score: 5,
+      fit_signal: 'Some fit signal.',
+      gap: 'Some gap.',
+      critical_keywords: 'HIPAA, HITECH, EHR integration',
+      over_qualified: false,
+    });
+    const result = parseScoreResponse(payload);
+
+    expect(result.criticalKeywords).toBe('HIPAA, HITECH, EHR integration');
+  });
+
+  it('defaults critical_keywords to empty string when missing', () => {
+    const payload = JSON.stringify({
+      score: 5,
+      fit_signal: 'Some fit signal.',
+      gap: 'Some gap.',
+      over_qualified: false,
+    });
+    const result = parseScoreResponse(payload);
+
+    expect(result.criticalKeywords).toBe('');
+  });
+
+  it('defaults critical_keywords to empty string when empty', () => {
+    const payload = JSON.stringify({
+      score: 5,
+      fit_signal: 'Some fit signal.',
+      gap: 'Some gap.',
+      critical_keywords: '',
+      over_qualified: false,
+    });
+    const result = parseScoreResponse(payload);
+
+    expect(result.criticalKeywords).toBe('');
+  });
+
+  // ── over_qualified ────────────────────────────────────────────────
+
+  it('parses over_qualified as true when true', () => {
+    const payload = JSON.stringify({
+      score: 5,
+      fit_signal: 'Some fit signal.',
+      gap: 'Some gap.',
+      over_qualified: true,
+    });
+    const result = parseScoreResponse(payload);
+
+    expect(result.overQualified).toBe(true);
+  });
+
+  it('defaults over_qualified to false when missing', () => {
+    const payload = JSON.stringify({
+      score: 5,
+      fit_signal: 'Some fit signal.',
+      gap: 'Some gap.',
+    });
+    const result = parseScoreResponse(payload);
+
+    expect(result.overQualified).toBe(false);
+  });
+
+  it('defaults over_qualified to false when null', () => {
+    const payload = JSON.stringify({
+      score: 5,
+      fit_signal: 'Some fit signal.',
+      gap: 'Some gap.',
+      over_qualified: null,
+    });
+    const result = parseScoreResponse(payload);
+
+    expect(result.overQualified).toBe(false);
+  });
+
+  it('coerces over_qualified string "true" to boolean true', () => {
+    const payload = JSON.stringify({
+      score: 5,
+      fit_signal: 'Some fit signal.',
+      gap: 'Some gap.',
+      over_qualified: 'true',
+    });
+    const result = parseScoreResponse(payload);
+
+    expect(result.overQualified).toBe(true);
+  });
+
+  it('coerces over_qualified number 1 to boolean true', () => {
+    const payload = JSON.stringify({
+      score: 5,
+      fit_signal: 'Some fit signal.',
+      gap: 'Some gap.',
+      over_qualified: 1,
+    });
+    const result = parseScoreResponse(payload);
+
+    expect(result.overQualified).toBe(true);
+  });
+
+  it('coerces over_qualified number 0 to boolean false', () => {
+    const payload = JSON.stringify({
+      score: 5,
+      fit_signal: 'Some fit signal.',
+      gap: 'Some gap.',
+      over_qualified: 0,
+    });
+    const result = parseScoreResponse(payload);
+
+    expect(result.overQualified).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -211,5 +325,21 @@ describe('createScoredJob', () => {
     createScoredJob(job, scoreResult);
 
     expect(job).toEqual(original);
+  });
+
+  it('binds criticalKeywords onto scored job', () => {
+    const job = makeJobFile();
+    const scoreResult = makeScoreResult({ criticalKeywords: 'HIPAA, HITECH' });
+    const scoredJob = createScoredJob(job, scoreResult);
+
+    expect(scoredJob.criticalKeywords).toBe('HIPAA, HITECH');
+  });
+
+  it('binds overQualified onto scored job', () => {
+    const job = makeJobFile();
+    const scoreResult = makeScoreResult({ overQualified: true });
+    const scoredJob = createScoredJob(job, scoreResult);
+
+    expect(scoredJob.overQualified).toBe(true);
   });
 });

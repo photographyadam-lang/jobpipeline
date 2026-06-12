@@ -191,6 +191,22 @@ function formatForensicAudit(jobMeta, auditNarrative, keywordTable) {
   lines.push(`# Forensic Audit — ${jobMeta.company} | ${jobMeta.title}`);
   lines.push('');
 
+  // ── Job Metadata ─────────────────────────────────────────────────────────
+  lines.push('## Job Information');
+  lines.push('');
+  lines.push('| Field | Value |');
+  lines.push('|-------|-------|');
+  lines.push(`| **Company** | ${jobMeta.company} |`);
+  lines.push(`| **Title** | ${jobMeta.title} |`);
+  lines.push(`| **Location** | ${jobMeta.location || 'N/A'} |`);
+  lines.push(`| **Salary** | ${jobMeta.salary || 'N/A'} |`);
+  lines.push(`| **Stack Rank** | ${jobMeta.rank != null ? '#' + jobMeta.rank : 'N/A'} |`);
+  lines.push(`| **Score** | ${jobMeta.score != null ? jobMeta.score + '/10' : 'N/A'} |`);
+  lines.push(`| **Action Flag** | ${jobMeta.actionFlag || 'N/A'} |`);
+  lines.push(`| **URL** | ${jobMeta.url || 'N/A'} |`);
+  lines.push(`| **LinkedIn Job ID** | ${jobMeta.linkedInJobId || 'N/A'} |`);
+  lines.push('');
+
   // Audit narrative
   lines.push(auditNarrative.trim());
   lines.push('');

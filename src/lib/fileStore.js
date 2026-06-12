@@ -342,6 +342,53 @@ async function writeForensicAudit(resumesDir, dateStr, company, title, content) 
   return fullPath;
 }
 
+/**
+ * Read a forensic_audit.md file from a job's output directory.
+ *
+ * @param {string} resumesDir - Path to the resumes directory.
+ * @param {string} dateStr - Date string in "YYYY-MM-DD" format.
+ * @param {string} company - Company name (raw — will be sanitized).
+ * @param {string} title - Job title (raw — will be sanitized).
+ * @returns {Promise<string>} The file content.
+ * @throws {Error} If the file is not found.
+ */
+async function readForensicAudit(resumesDir, dateStr, company, title) {
+  const safeCompany = sanitizeForFilename(company, 60);
+  const safeTitle = sanitizeForFilename(title, 60);
+  const folderName = `${safeCompany} - ${safeTitle}`;
+  const fullPath = path.join(resumesDir, dateStr, folderName, 'forensic_audit.md');
+  return await fs.readFile(fullPath, 'utf-8');
+}
+
+/**
+ * Read a qa_report.md file from a dated output directory.
+ *
+ * @param {string} resumesDir - Path to the resumes directory.
+ * @param {string} dateStr - Date string in "YYYY-MM-DD" format.
+ * @returns {Promise<string>} The file content.
+ * @throws {Error} If the file is not found.
+ */
+async function readQaReport(resumesDir, dateStr) {
+  const fullPath = path.join(resumesDir, dateStr, 'qa_report.md');
+  return await fs.readFile(fullPath, 'utf-8');
+}
+
+/**
+ * Write the prompt diagnostics report markdown file to a dated output directory.
+ *
+ * @param {string} resumesDir - Path to the resumes directory.
+ * @param {string} dateStr - Date string in "YYYY-MM-DD" format.
+ * @param {string} content - Markdown report content.
+ * @returns {Promise<string>} The full path written.
+ */
+async function writePromptDiagnostics(resumesDir, dateStr, content) {
+  const targetDir = path.join(resumesDir, dateStr);
+  await fs.mkdir(targetDir, { recursive: true });
+  const fullPath = path.join(targetDir, `prompt_diagnostics_${dateStr}.md`);
+  await fs.writeFile(fullPath, content, 'utf-8');
+  return fullPath;
+}
+
 module.exports = {
   readJobFiles,
   writeJobFile,
@@ -358,4 +405,7 @@ module.exports = {
   readDocFile,
   writeDocFile,
   writeForensicAudit,
+  readForensicAudit,
+  readQaReport,
+  writePromptDiagnostics,
 };

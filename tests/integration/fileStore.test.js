@@ -651,3 +651,139 @@ describe('writeQaReport', () => {
     expect(dirStat.isDirectory()).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// readForensicAudit
+// ---------------------------------------------------------------------------
+describe('readForensicAudit', () => {
+  let tmpDir;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'job-pipeline-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('reads forensic_audit.md from a job output directory', async () => {
+    const resumesDir = path.join(tmpDir, 'resumes');
+    const dateStr = '2026-06-02';
+    const company = 'TestCorp';
+    const title = 'Senior Engineer';
+    const auditContent = '# Forensic Audit — TestCorp | Senior Engineer\n\n## Identity Projection\n\nStrong match.\n';
+
+    // Write the forensic_audit.md to the expected path using direct fs
+    const safeCompany = 'TestCorp';
+    const safeTitle = 'Senior-Engineer';
+    const targetDir = path.join(resumesDir, dateStr, `${safeCompany} - ${safeTitle}`);
+    await fs.mkdir(targetDir, { recursive: true });
+    await fs.writeFile(path.join(targetDir, 'forensic_audit.md'), auditContent, 'utf-8');
+
+    const result = await fileStore.readForensicAudit(resumesDir, dateStr, company, title);
+    expect(result).toBe(auditContent);
+  });
+
+  it('throws ENOENT when forensic_audit.md does not exist', async () => {
+    const resumesDir = path.join(tmpDir, 'resumes');
+    const dateStr = '2026-06-02';
+    const company = 'NoAuditCo';
+    const title = 'Ghost Role';
+
+    await expect(
+      fileStore.readForensicAudit(resumesDir, dateStr, company, title)
+    ).rejects.toThrow(/ENOENT|no such file/i);
+  });
+
+  it('sanitizes company name in path resolution', async () => {
+    const resumesDir = path.join(tmpDir, 'resumes');
+    const dateStr = '2026-06-02';
+    const company = 'AT&T Corp';
+    const title = 'Privacy Manager';
+    const auditContent = '# Forensic Audit';
+
+    // Write using sanitized path matching readForensicAudit internals
+    const safeCompany = 'ATT-Corp';
+    const safeTitle = 'Privacy-Manager';
+    const targetDir = path.join(resumesDir, dateStr, `${safeCompany} - ${safeTitle}`);
+    await fs.mkdir(targetDir, { recursive: true });
+    await fs.writeFile(path.join(targetDir, 'forensic_audit.md'), auditContent, 'utf-8');
+
+    const result = await fileStore.readForensicAudit(resumesDir, dateStr, company, title);
+    expect(result).toBe(auditContent);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readQaReport
+// ---------------------------------------------------------------------------
+describe('readQaReport', () => {
+  let tmpDir;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'job-pipeline-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('reads qa_report.md from dated directory', async () => {
+    const resumesDir = path.join(tmpDir, 'resumes');
+    const dateStr = '2026-06-02';
+    const content = '# QA Report\n\n## Summary\n\nAll checks passed.';
+
+    await fs.mkdir(path.join(resumesDir, dateStr), { recursive: true });
+    await fs.writeFile(path.join(resumesDir, dateStr, 'qa_report.md'), content, 'utf-8');
+
+    const result = await fileStore.readQaReport(resumesDir, dateStr);
+    expect(result).toBe(content);
+  });
+
+  it('throws ENOENT when qa_report.md does not exist', async () => {
+    const resumesDir = path.join(tmpDir, 'resumes');
+    const dateStr = '2026-06-02';
+
+    await expect(fileStore.readQaReport(resumesDir, dateStr)).rejects.toThrow(/ENOENT|no such file/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// writePromptDiagnostics
+// ---------------------------------------------------------------------------
+describe('writePromptDiagnostics', () => {
+  let tmpDir;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'job-pipeline-test-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('writes prompt_diagnostics_YYYY-MM-DD.md to dated directory', async () => {
+    const resumesDir = path.join(tmpDir, 'resumes');
+    const dateStr = '2026-06-02';
+    const content = '# Prompt Diagnostics — 2026-06-02\n\n## Recommendations\n\n...';
+
+    const fullPath = await fileStore.writePromptDiagnostics(resumesDir, dateStr, content);
+
+    expect(fullPath).toContain(`prompt_diagnostics_${dateStr}.md`);
+    expect(fullPath).toContain(dateStr);
+
+    const written = await fs.readFile(fullPath, 'utf-8');
+    expect(written).toBe(content);
+  });
+
+  it('creates dated subdirectory when absent', async () => {
+    const resumesDir = path.join(tmpDir, 'resumes');
+    const dateStr = '2026-06-02';
+    const content = '# Prompt Diagnostics';
+
+    await fileStore.writePromptDiagnostics(resumesDir, dateStr, content);
+
+    const dirStat = await fs.stat(path.join(resumesDir, dateStr));
+    expect(dirStat.isDirectory()).toBe(true);
+  });
+});

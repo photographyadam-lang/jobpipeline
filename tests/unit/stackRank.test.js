@@ -366,6 +366,53 @@ describe('formatStackRank', () => {
     expect(markdown).toContain('**Must-Haves:**');
     expect(markdown).toContain('**Target Archetype:**');
     expect(markdown).toContain('**Pillar Library Matches:**');
+    expect(markdown).toContain('**Critical Keywords:**');
+  });
+
+  // ── over_qualified hazard marker ──────────────────────────────────
+
+  it('renders OVER-QUALIFIED marker when overQualified is true', () => {
+    const jobs = [makeScoredJob({ overQualified: true })];
+    const result = formatStackRank(jobs, testDate, [], makeStats());
+
+    expect(result).toContain('⚠️ OVER-QUALIFIED');
+  });
+
+  it('does NOT render OVER-QUALIFIED marker when overQualified is false', () => {
+    const jobs = [makeScoredJob({ overQualified: false })];
+    const result = formatStackRank(jobs, testDate, [], makeStats());
+
+    expect(result).not.toContain('⚠️');
+  });
+
+  it('does NOT render OVER-QUALIFIED marker when overQualified is undefined', () => {
+    const jobs = [makeScoredJob({})];
+    const result = formatStackRank(jobs, testDate, [], makeStats());
+
+    expect(result).not.toContain('⚠️');
+  });
+
+  // ── Critical Keywords field ───────────────────────────────────────
+
+  it('renders Critical Keywords field in each job entry', () => {
+    const jobs = [makeScoredJob({ criticalKeywords: 'HIPAA, HITECH, EHR integration' })];
+    const result = formatStackRank(jobs, testDate, [], makeStats());
+
+    expect(result).toContain('**Critical Keywords:** HIPAA, HITECH, EHR integration');
+  });
+
+  it('renders em-dash when criticalKeywords is empty string', () => {
+    const jobs = [makeScoredJob({ criticalKeywords: '' })];
+    const result = formatStackRank(jobs, testDate, [], makeStats());
+
+    expect(result).toContain('**Critical Keywords:** —');
+  });
+
+  it('renders em-dash when criticalKeywords is undefined', () => {
+    const jobs = [makeScoredJob({})];
+    const result = formatStackRank(jobs, testDate, [], makeStats());
+
+    expect(result).toContain('**Critical Keywords:** —');
   });
 });
 
@@ -439,6 +486,7 @@ describe('parseStackRank', () => {
       title: 'Senior Privacy Manager',
       sourceFilename: 'sample_job_1.md',
       linkedInJobId: '3987654321',
+      criticalKeywords: '—',
     });
     expect(parsed[1]).toMatchObject({
       rank: 2,
@@ -448,7 +496,23 @@ describe('parseStackRank', () => {
       title: 'AI Governance Analyst',
       sourceFilename: 'sample_job_2.md',
       linkedInJobId: '1122334455',
+      criticalKeywords: '—',
     });
+  });
+
+  it('extracts criticalKeywords from round-trip markdown', () => {
+    const jobs = [
+      makeScoredJob({
+        rank: 1,
+        score: 8,
+        actionFlag: 'DEEP_TAILOR',
+        criticalKeywords: 'HIPAA, HITECH, EHR integration',
+      }),
+    ];
+    const markdown = formatStackRank(jobs, testDate, [], makeStats());
+    const parsed = parseStackRank(markdown);
+
+    expect(parsed[0].criticalKeywords).toBe('HIPAA, HITECH, EHR integration');
   });
 
   it('returns empty array for empty markdown', () => {

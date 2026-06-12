@@ -97,6 +97,11 @@ function buildResumePrompt(careerContents, pillarContents, scoredJob, outputInst
     scoredJob.gap,
   ];
 
+  if (scoredJob.criticalKeywords) {
+    parts.push('', 'CRITICAL KEYWORDS TO WEAVE:', '');
+    parts.push(scoredJob.criticalKeywords);
+  }
+
   if (outputInstruction) {
     parts.push('', outputInstruction);
   }
@@ -131,7 +136,7 @@ function buildCoverLetterPrompt(careerContents, scoredJob, resumeContent) {
     throw new Error('buildCoverLetterPrompt: resumeContent must be a non-empty string');
   }
 
-  return [
+  const parts = [
     'CAREER HISTORY:',
     '',
     careerContents,
@@ -139,11 +144,16 @@ function buildCoverLetterPrompt(careerContents, scoredJob, resumeContent) {
     'JOB DESCRIPTION:',
     '',
     scoredJob.description,
-    '',
-    'GENERATED RESUME:',
-    '',
-    resumeContent,
-  ].join('\n');
+  ];
+
+  if (scoredJob.criticalKeywords) {
+    parts.push('', 'CRITICAL KEYWORDS TO WEAVE:', '');
+    parts.push(scoredJob.criticalKeywords);
+  }
+
+  parts.push('', 'GENERATED RESUME:', '', resumeContent);
+
+  return parts.join('\n');
 }
 
 /**
@@ -172,19 +182,21 @@ function buildQualityPrompt(scoredJob, resumeContent, coverLetterContent) {
     throw new Error('buildQualityPrompt: coverLetterContent must be a non-empty string');
   }
 
-  return [
+  const parts = [
     'JOB DESCRIPTION:',
     '',
     scoredJob.description,
-    '',
-    'GENERATED RESUME:',
-    '',
-    resumeContent,
-    '',
-    'GENERATED COVER LETTER:',
-    '',
-    coverLetterContent,
-  ].join('\n');
+  ];
+
+  if (scoredJob.criticalKeywords) {
+    parts.push('', 'CRITICAL KEYWORDS TO WEAVE:', '');
+    parts.push(scoredJob.criticalKeywords);
+  }
+
+  parts.push('', 'GENERATED RESUME:', '', resumeContent);
+  parts.push('', 'GENERATED COVER LETTER:', '', coverLetterContent);
+
+  return parts.join('\n');
 }
 
 module.exports = {

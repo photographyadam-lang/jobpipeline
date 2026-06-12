@@ -124,6 +124,7 @@ function buildScoredJobLike(qualifyingJob, jobFile, fitSignal, gap) {
     gap,
     rank: qualifyingJob.rank,
     actionFlag: qualifyingJob.actionFlag,
+    criticalKeywords: qualifyingJob.criticalKeywords || '',
   };
 }
 

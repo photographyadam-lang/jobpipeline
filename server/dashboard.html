@@ -391,6 +391,15 @@
   }
   .h-folder-link:hover { text-decoration: underline; }
 
+  .h-jd-link {
+    color: var(--accent-blue);
+    text-decoration: none;
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .h-jd-link:hover { text-decoration: underline; }
+
   .h-apply-btn {
     background: transparent;
     border: 1px solid #1565c0;
@@ -478,6 +487,26 @@
     background: var(--accent-blue);
     color: #000;
     font-weight: bold;
+  }
+
+  /* Sort dropdown — matches filter button styling */
+  .sort-select {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .sort-select:hover {
+    background: var(--bg-tertiary);
+  }
+  .sort-select:focus {
+    outline: none;
+    border-color: var(--accent-blue);
   }
 
   /* ===================================================================
@@ -652,6 +681,14 @@
   }
   .pipeline-btn.run-review:hover:not(:disabled) {
     background: #b388ff;
+  }
+
+  .pipeline-btn.run-optimize {
+    background: #00bcd4;
+    color: #000;
+  }
+  .pipeline-btn.run-optimize:hover:not(:disabled) {
+    background: #4dd0e1;
   }
 
   .pipeline-btn.cleanup-btn {
@@ -905,7 +942,15 @@
         <div class="app-history-filters">
           <button type="button" class="filter-btn active" data-filter="active">Active Run Only</button>
           <button type="button" class="filter-btn" data-filter="all">View Full Ledger</button>
+          <button type="button" class="filter-btn" data-filter="applied">Applied Only</button>
         </div>
+        <select id="app-history-sort" class="sort-select">
+          <option value="default">Sort: Default</option>
+          <option value="company">Sort: Company A-Z</option>
+          <option value="score">Sort: Score (high-low)</option>
+          <option value="dateGenerated">Sort: Date Generated (newest)</option>
+          <option value="dateApplied">Sort: Date Applied (newest)</option>
+        </select>
       </div>
       <div id="app-history-content"></div>
     </section>
@@ -948,6 +993,10 @@
         <button id="pipeline-btn-cleanup" type="button" class="pipeline-btn cleanup-btn">
           <span class="spinner"></span>
           &#9654; Run Cleanup Archiver
+        </button>
+        <button id="pipeline-btn-optimize" type="button" class="pipeline-btn run-optimize">
+          <span class="spinner"></span>
+          &#9654; Analyze Prompt Performance
         </button>
       </div>
 
@@ -1061,6 +1110,7 @@ function updateHeader(phase, dateStr) {
   if (phase === 'scoring')    label = '\u{1F3AF} Scoring Jobs...';
   if (phase === 'generating') label = '\u2699\uFE0F Generating Documents...';
   if (phase === 'reviewing')  label = '\u{1F50D} Reviewing Documents...';
+  if (phase === 'optimizing') label = '\u2699\uFE0F Analyzing Prompt Performance...';
   if (phase === 'idle')       label = 'Pipeline Dashboard';
   if (phase === 'harvesting') label = '\u{1F33D} Harvesting...';
 
@@ -1246,8 +1296,10 @@ function updateQualityCell(data) {
  * Each card is laid out as a horizontal flex row with left-side metadata
  * and right-side status/actions, maximizing horizontal screen utilization.
  * Filters the displayed records based on the active appHistoryFilter:
- * - 'active': only records where dateGenerated matches currentRunDate
- * - 'all':    renders the entire array
+ * - 'active':   only records where dateGenerated matches currentRunDate
+ * - 'all':      renders the entire array
+ * - 'applied':  only records with status === 'applied'.
+ * Then applies the active sort via appHistorySort.
  * @param {Array} history - Array of ApplicationRecord objects.
  */
 function renderAppHistory(history) {
@@ -1270,6 +1322,13 @@ function renderAppHistory(history) {
         }
       }
     }
+  } else if (appHistoryFilter === 'applied') {
+    displayHistory = [];
+    for (var fi = 0; fi < history.length; fi++) {
+      if (history[fi].status === 'applied') {
+        displayHistory.push(history[fi]);
+      }
+    }
   } else {
     displayHistory = history;
   }
@@ -1279,9 +1338,34 @@ function renderAppHistory(history) {
     var emptyMsg = 'No application documents found for the active run.';
     if (appHistoryFilter === 'all') {
       emptyMsg = 'No applications yet. Run <code>generate.js</code> to create application packages.';
+    } else if (appHistoryFilter === 'applied') {
+      emptyMsg = 'No applications have been marked as applied yet.';
     }
     appHistoryContent.innerHTML = '<div class="empty-state">' + emptyMsg + '</div>';
     return;
+  }
+
+  // Apply sort — modifies displayHistory in place
+  if (appHistorySort !== 'default') {
+    displayHistory.sort(function(a, b) {
+      switch (appHistorySort) {
+        case 'company':
+          return (a.company || '').localeCompare(b.company || '');
+        case 'score':
+          return (b.score ?? 0) - (a.score ?? 0);
+        case 'dateGenerated':
+          return (b.dateGenerated || '').localeCompare(a.dateGenerated || '');
+        case 'dateApplied':
+          var aDate = a.dateApplied || '';
+          var bDate = b.dateApplied || '';
+          if (aDate === '' && bDate === '') return 0;
+          if (aDate === '') return 1;
+          if (bDate === '') return -1;
+          return bDate.localeCompare(aDate);
+        default:
+          return 0;
+      }
+    });
   }
 
   // Summary counts by status (based on filtered list)
@@ -1327,8 +1411,12 @@ function renderAppHistory(history) {
     }
     var scoreHtml = 'Score: <strong>' + score + '</strong>/10 &middot; Generated: ' + dateGenerated + dateAppliedHtml;
 
-    // Right section: status badge, folder link, apply button
+    // Right section: status badge, JD link, folder link, apply button
     var rightParts = '<span class="h-status status-' + status + '">' + status + '</span>';
+
+    if (url) {
+      rightParts += '<a href="' + url + '" target="_blank" class="h-jd-link" title="Open job description in new tab">JD</a>';
+    }
 
     if (rec.outputPath) {
       rightParts += '<a href="#" class="h-folder-link" data-id="' + id + '" title="Open output folder in Explorer">\uD83D\uDCC1 Folder</a>';
@@ -1357,10 +1445,10 @@ function renderAppHistory(history) {
 
 /**
  * Set the active application history filter and re-render.
- * @param {'active'|'all'} filter - The filter mode to activate.
+ * @param {'active'|'all'|'applied'} filter - The filter mode to activate.
  */
 function setAppHistoryFilter(filter) {
-  if (filter !== 'active' && filter !== 'all') return;
+  if (filter !== 'active' && filter !== 'all' && filter !== 'applied') return;
   appHistoryFilter = filter;
 
   // Update button active state
@@ -1633,9 +1721,21 @@ var currentCounts = { harvested: 0, scored: 0, generated: 0 };
  * Application History filter state.
  * 'active' — only show records matching the current run date.
  * 'all' — show the full application ledger.
+ * 'applied' — only show records with status === 'applied'.
  * @type {string}
  */
 var appHistoryFilter = 'active';
+
+/**
+ * Application History sort key.
+ * 'default' — no sorting, display order from data.
+ * 'company' — alphabetical by company name.
+ * 'score' — descending by score.
+ * 'dateGenerated' — descending by date generated.
+ * 'dateApplied' — descending by date applied (nulls last).
+ * @type {string}
+ */
+var appHistorySort = 'default';
 
 /**
  * The date of the current pipeline run, set from state.date.
@@ -1856,6 +1956,13 @@ function init() {
   } catch (err) {
     addDebugLog('init() Step 6 (app history filters) failed: ' + err.message, 'error');
   }
+
+  // Step 7: Wire the application history sort dropdown
+  try {
+    wireAppHistorySort();
+  } catch (err) {
+    addDebugLog('init() Step 7 (app history sort) failed: ' + err.message, 'error');
+  }
 }
 
 /**
@@ -1904,6 +2011,37 @@ function wireAppHistoryFilters() {
       });
     })(buttons[i]);
   }
+}
+
+/**
+ * Wire the application history sort dropdown.
+ * Changing the sort value updates the sort key and re-renders
+ * the history panel using the current filter.
+ */
+function wireAppHistorySort() {
+  var sortSelect = document.getElementById('app-history-sort');
+  if (!sortSelect) return;
+
+  sortSelect.addEventListener('change', function() {
+    appHistorySort = sortSelect.value;
+
+    // Re-fetch current state and re-render application history
+    try {
+      fetch('/state')
+        .then(function(res) {
+          if (!res.ok) throw new Error('Server returned ' + res.status);
+          return res.json();
+        })
+        .then(function(state) {
+          renderAppHistory(state.applicationHistory || []);
+        })
+        .catch(function() {
+          addDebugLog('wireAppHistorySort: failed to fetch state', 'error');
+        });
+    } catch (err) {
+      addDebugLog('wireAppHistorySort: ' + err.message, 'error');
+    }
+  });
 }
 
 // Wait for DOM to be ready
@@ -2055,6 +2193,7 @@ var PIPELINE_TASKS = {
   qa:       { btnId: 'pipeline-btn-qa',       label: 'Forensic Auditor' },
   review:   { btnId: 'pipeline-btn-review',   label: 'Review Engine' },
   cleanup:  { btnId: 'pipeline-btn-cleanup',  label: 'Cleanup Archiver' },
+  optimize: { btnId: 'pipeline-btn-optimize', label: 'Prompt Optimizer' },
 };
 
 /** @type {EventSource|null} */
@@ -2316,6 +2455,14 @@ function wirePipelineControls() {
   if (cleanupBtn) {
     cleanupBtn.addEventListener('click', function() {
       startPipelineTask('cleanup');
+    });
+  }
+
+  // Prompt Optimizer button
+  var optimizeBtn = document.getElementById('pipeline-btn-optimize');
+  if (optimizeBtn) {
+    optimizeBtn.addEventListener('click', function() {
+      startPipelineTask('optimize');
     });
   }
 

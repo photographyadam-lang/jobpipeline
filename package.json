@@ -18,7 +18,8 @@
     "apply": "node apply.js",
     "build:bookmarklet": "node scripts/minify-bookmarklet.js",
     "qa": "node src/qa.js",
-    "review": "node review.js"
+    "review": "node review.js",
+    "optimize": "node optimize.js"
   },
   "dependencies": {
     "dotenv": "^16.0.0",
